@@ -167,6 +167,7 @@
         <!-- Tab Navigation -->
         <div class="tab-bar">
             <button class="tab-btn active" onclick="switchTab('tabTransactions', this)">&#128203; Transactions</button>
+            <button class="tab-btn" onclick="switchTab('tabMonthly', this)">&#128202; Monthly Reports</button>
             <button class="tab-btn" onclick="switchTab('tabBroadcast', this)">&#128226; Broadcast Message</button>
             <button class="tab-btn" onclick="switchTab('tabNotifications', this)">&#128276; Notification Log</button>
         </div>
@@ -258,7 +259,31 @@
                 </div>
             </div>
         </div>
-
+        <!-- Tab: Monthly Reports -->
+        <div id="tabMonthly" class="tab-panel">
+            <div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
+                    <div class="card-title">&#128202; Monthly Reports</div>
+                    <button class="btn btn-secondary" style="padding:8px 16px;font-size:.85rem" onclick="loadMonthlyReports()">&#8635; Refresh</button>
+                </div>
+                <div style="overflow-x:auto">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Month</th>
+                                <th>Completed Exits</th>
+                                <th>Unique Drivers</th>
+                                <th>Revenue (KES)</th>
+                                <th>Average Duration</th>
+                            </tr>
+                        </thead>
+                        <tbody id="monthlyReportsTable">
+                            <tr><td colspan="5" style="text-align:center;color:var(--text-dim)">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
         <!-- Tab: Notifications -->
         <div id="tabNotifications" class="tab-panel">
             <div class="card">
@@ -289,6 +314,7 @@
         currentTab = tabId;
         if (tabId === 'tabBroadcast') loadBroadcasts();
         if (tabId === 'tabNotifications') loadNotifications();
+        if (tabId === 'tabMonthly') loadMonthlyReports();
     }
 
     function formatDate(iso) {
@@ -351,6 +377,30 @@
                     '</tr>';
             }).join('');
         } catch(e) {}
+    }
+
+    async function loadMonthlyReports() {
+        try {
+            var resp = await fetch('/v1/admin/monthly-reports');
+            var reports = await resp.json();
+            var tbody = document.getElementById('monthlyReportsTable');
+            if (!reports.length) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim)">No monthly report data available</td></tr>';
+                return;
+            }
+            tbody.innerHTML = reports.map(function(r) {
+                var avg = r.avg_duration ? formatDuration(r.avg_duration) : '--';
+                return '<tr>' +
+                    '<td>' + (r.month || '--') + '</td>' +
+                    '<td>' + (r.total_exits || 0) + '</td>' +
+                    '<td>' + (r.unique_drivers || 0) + '</td>' +
+                    '<td style="color:var(--accent)">KES ' + (r.total_revenue || 0).toLocaleString() + '</td>' +
+                    '<td>' + avg + '</td>' +
+                    '</tr>';
+            }).join('');
+        } catch(e) {
+            document.getElementById('monthlyReportsTable').innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--danger)">Failed to load monthly reports</td></tr>';
+        }
     }
 
     function updateCharCount() {

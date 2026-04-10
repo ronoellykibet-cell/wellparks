@@ -159,7 +159,7 @@
                 <input type="text" id="searchInput" placeholder="&#128269; Search by plate, email or phone..." oninput="filterUsers()">
                 <select id="statusFilter" onchange="filterUsers()">
                     <option value="all">All Drivers</option>
-                    <option value="parked">Currently Parked</option>
+                    <option value="parked" selected>Currently Parked</option>
                     <option value="exited">Past Drivers</option>
                 </select>
                 <button class="btn btn-secondary" style="padding:10px 16px;font-size:.85rem;" onclick="loadUsers()">&#8635; Refresh</button>
@@ -266,19 +266,21 @@
             var url = '/v1/admin/users?status=' + status + (search ? '&search=' + encodeURIComponent(search) : '');
             var resp = await fetch(url);
             if (resp.status === 401) { window.location.href = '/login'; return; }
-            allUsers = await resp.json();
+            if (!resp.ok) { throw new Error('HTTP ' + resp.status + ': ' + resp.statusText); }
+            var data = await resp.json();
+            allUsers = data.users;
             renderUsers(allUsers);
-            updateSummary(allUsers);
+            updateSummary(data.total, data.total_spent, allUsers);
         } catch(e) {
-            document.getElementById('usersTable').innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger)">Failed to load users</td></tr>';
+            console.error('Load users error:', e);
+            document.getElementById('usersTable').innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger)">Failed to load users: ' + e.message + '</td></tr>';
         }
     }
 
-    function updateSummary(users) {
-        document.getElementById('sumTotal').textContent = users.length;
-        document.getElementById('sumParked').textContent = users.filter(function(u) { return u.currently_parked; }).length;
-        var total = users.reduce(function(acc, u) { return acc + (u.total_spent || 0); }, 0);
-        document.getElementById('sumRevenue').textContent = total.toLocaleString();
+    function updateSummary(total, totalSpent, filteredUsers) {
+        document.getElementById('sumTotal').textContent = total;
+        document.getElementById('sumParked').textContent = filteredUsers.filter(function(u) { return u.currently_parked; }).length;
+        document.getElementById('sumRevenue').textContent = totalSpent.toLocaleString();
     }
 
     function renderUsers(users) {

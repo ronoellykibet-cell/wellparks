@@ -666,7 +666,11 @@ async def admin_stats(request: Request):
         "SELECT COUNT(*) FROM transactions WHERE payment_status='COMPLETED' AND date(exit_time)=?",
         (today,)).fetchone()[0]
     total_users = conn.execute(
-        "SELECT COUNT(DISTINCT driver_email) FROM transactions WHERE driver_email IS NOT NULL AND driver_email != ''"
+        "SELECT COUNT(DISTINCT driver_email) FROM ("
+        "SELECT driver_email FROM transactions WHERE driver_email IS NOT NULL AND driver_email != '' "
+        "UNION "
+        "SELECT driver_email FROM spaces WHERE is_occupied=1 AND driver_email IS NOT NULL AND driver_email != ''"
+        ")"
     ).fetchone()[0]
     total_revenue = conn.execute(
         "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE payment_status='COMPLETED'"
@@ -688,8 +692,31 @@ async def recent_exits(request: Request):
     return [dict(e) for e in exits]
 
 
+@app.get("/v1/admin/monthly-reports")
+async def monthly_reports(request: Request):
+    require_admin(request)
+    conn = get_db()
+    reports = conn.execute(
+        """
+        SELECT 
+            strftime('%Y-%m', exit_time) as month,
+            COUNT(*) as total_exits,
+            COALESCE(SUM(amount), 0) as total_revenue,
+            COALESCE(AVG(duration_minutes), 0) as avg_duration,
+            COUNT(DISTINCT driver_email) as unique_drivers
+        FROM transactions
+        WHERE payment_status='COMPLETED' AND exit_time IS NOT NULL
+        GROUP BY month
+        ORDER BY month DESC
+        LIMIT 12
+        """
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in reports]
+
+
 @app.get("/v1/admin/users")
-async def list_users(request: Request, search: str = "", status: str = "all"):
+async def list_users(request: Request, search: str = "", status: str = "parked"):
     require_admin(request)
     conn = get_db()
     query = """
@@ -697,36 +724,67 @@ async def list_users(request: Request, search: str = "", status: str = "all"):
             t.driver_email, t.driver_phone, t.plate_number,
             COUNT(*) as total_visits,
             COALESCE(SUM(t.amount),0) as total_spent,
-            MAX(t.created_at) as last_visit,
-            s.is_occupied as currently_parked,
-            s.space_number as current_space
+            MAX(t.created_at) as last_visit
         FROM transactions t
-        LEFT JOIN spaces s ON s.plate_number = t.plate_number AND s.is_occupied = 1
         WHERE t.driver_email IS NOT NULL AND t.driver_email != ''
+        GROUP BY t.driver_email, t.plate_number
     """
-    params = []
-    if search:
-        query += " AND (t.driver_email LIKE ? OR t.plate_number LIKE ? OR t.driver_phone LIKE ?)"
-        params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
-    query += " GROUP BY t.driver_email, t.plate_number ORDER BY last_visit DESC"
-    rows = conn.execute(query, params).fetchall()
-    also_parked = conn.execute(
-        "SELECT * FROM spaces WHERE is_occupied=1"
+    rows = conn.execute(query).fetchall()
+    parked_spaces = conn.execute(
+        "SELECT * FROM spaces WHERE is_occupied=1 AND driver_email IS NOT NULL AND driver_email != ''"
     ).fetchall()
     conn.close()
 
-    users = [dict(r) for r in rows]
-    parked_plates = {r["plate_number"] for r in also_parked}
+    users_map = {}
+    for row in rows:
+        key = (row["driver_email"], row["plate_number"])
+        users_map[key] = {
+            "driver_email": row["driver_email"],
+            "driver_phone": row["driver_phone"],
+            "plate_number": row["plate_number"],
+            "total_visits": row["total_visits"],
+            "total_spent": row["total_spent"],
+            "last_visit": row["last_visit"],
+            "currently_parked": False,
+            "current_space": None,
+        }
+
+    for space in parked_spaces:
+        key = (space["driver_email"], space["plate_number"])
+        entry_time = space["entry_time"]
+        if key in users_map:
+            users_map[key]["currently_parked"] = True
+            users_map[key]["current_space"] = space["space_number"]
+            if entry_time and entry_time > (users_map[key]["last_visit"] or ""):
+                users_map[key]["last_visit"] = entry_time
+        else:
+            users_map[key] = {
+                "driver_email": space["driver_email"],
+                "driver_phone": space["driver_phone"],
+                "plate_number": space["plate_number"],
+                "total_visits": 1,
+                "total_spent": 0,
+                "last_visit": entry_time,
+                "currently_parked": True,
+                "current_space": space["space_number"],
+            }
+
+    users = list(users_map.values())
+    if search:
+        term = search.strip().lower()
+        users = [u for u in users if term in (u["driver_email"] or "").lower() or term in (u["plate_number"] or "").lower() or term in (u["driver_phone"] or "").lower()]
 
     if status == "parked":
-        users = [u for u in users if u["plate_number"] in parked_plates]
+        users = [u for u in users if u["currently_parked"]]
     elif status == "exited":
-        users = [u for u in users if u["plate_number"] not in parked_plates]
+        users = [u for u in users if not u["currently_parked"]]
 
-    for u in users:
-        u["currently_parked"] = u["plate_number"] in parked_plates
+    users.sort(key=lambda u: u["last_visit"] or "", reverse=True)
 
-    return users
+    total_unique_drivers = len(users_map)  # Total unique drivers across all
+    total_spent = sum(u["total_spent"] for u in users_map.values())
+
+    return {"users": users, "total": total_unique_drivers, "total_spent": total_spent}
 
 
 @app.delete("/v1/admin/users/{plate}")
