@@ -140,7 +140,8 @@
                     <p style="margin-top:16px;font-size:.8rem;color:var(--text-dim);">
                         Ref: <span id="payRef">--</span><br>
                         <span class="loader" style="margin-top:12px"></span><br>
-                        Waiting for payment confirmation...
+                        <span id="paymentWaitingText">Waiting for payment confirmation...</span><br>
+                        <button class="btn btn-small" id="manualCheckBtn" style="margin-top:10px;display:none;" onclick="manualCheckPayment()">Check Payment Status</button>
                     </p>
                 </div>
             </div>
@@ -149,14 +150,19 @@
         <div id="gateSection" class="hidden">
             <div class="card" style="max-width:580px;margin:0 auto;">
                 <div class="gate-open-screen">
-                    <div class="gate-icon">&#9989;</div>
-                    <h2>Payment Received — Gate Open</h2>
-                    <div class="details">
-                        <p>Amount: <strong id="gateAmount" style="color:var(--accent)">--</strong></p>
-                        <p>Ref: <span id="gateRef">--</span></p>
-                        <p style="margin-top:8px;color:var(--text-dim);">Receipt emailed to driver. Drive safely!</p>
+                    <div class="gate-icon">✅</div>
+                    <h2 style="color: var(--accent); font-size: 1.8rem;">Payment Received — Gate Open</h2>
+                    <div class="details" style="background: rgba(132,204,22,0.1); padding: 16px; border-radius: 8px; border: 1px solid var(--accent); margin: 16px 0;">
+                        <p><strong>Amount Paid:</strong> <span id="gateAmount" style="color:var(--accent);">--</span></p>
+                        <p style="margin-top: 8px;"><strong>Transaction ID:</strong> <span id="gateRef" style="font-family: monospace; color: var(--accent);">--</span></p>
+                        <p style="margin-top: 8px; color:var(--text-dim);">✓ Receipt has been sent to driver email</p>
+                        <p style="margin-top: 8px; color:var(--text-dim);">✓ Space will be marked as available</p>
                     </div>
-                    <button class="btn btn-secondary" style="margin-top:24px" onclick="resetExit()">Process Another</button>
+                    <div style="margin-top: 24px;">
+                        <button class="btn btn-primary btn-block" onclick="exitAndReset()" style="margin-bottom: 10px;">✓ Driver Has Exited — Continue</button>
+                        <button class="btn btn-secondary btn-block" onclick="viewDashboard()">📊 View Transaction History</button>
+                        <button class="btn btn-secondary btn-block" style="margin-top:10px" onclick="resetExit()">⟲ Process Another Vehicle</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -181,6 +187,12 @@
     var pollInterval = null;
     var exitStream = null;
     var exitScanAnimId = null;
+    var pollStartTime = null;
+    var pollCount = 0;
+    var MAX_POLL_TIME = 45000; // 45 seconds - payment should complete quickly
+    var MAX_POLLS = 90; // Maximum number of polls
+    var POLL_INTERVAL = 500; // Poll every 500ms for faster detection
+    var MANUAL_CHECK_AFTER = 8000; // Show manual retry if not completed after 8 seconds
 
     function showAlert(id, msg) {
         var el = document.getElementById(id);
@@ -350,23 +362,94 @@
 
     function startPolling(plate, amount, ref) {
         if (pollInterval) clearInterval(pollInterval);
+        pollStartTime = Date.now();
+        pollCount = 0;
+        document.getElementById('manualCheckBtn').style.display = 'none';
+        var paymentWaitingText = document.getElementById('paymentWaitingText');
         pollInterval = setInterval(async function() {
+            pollCount++;
+            var elapsedSeconds = Math.floor((Date.now() - pollStartTime) / 1000);
+            var elapsedMinutes = Math.floor(elapsedSeconds / 60);
+            var remainingSeconds = elapsedSeconds % 60;
+            
+            // Update polling status text
+            if (paymentWaitingText) {
+                paymentWaitingText.innerHTML = 'Waiting for payment confirmation... (' + elapsedMinutes + 'm ' + remainingSeconds + 's)';
+            }
+            
+            if (Date.now() - pollStartTime > MANUAL_CHECK_AFTER) {
+                document.getElementById('manualCheckBtn').style.display = 'inline-block';
+            }
+            
+            // Check if we've exceeded max time or max polls
+            if (pollCount > MAX_POLLS || (Date.now() - pollStartTime) > MAX_POLL_TIME) {
+                clearInterval(pollInterval);
+                pollInterval = null;
+                // Show error and offer manual retry
+                showAlert('alertError', 'Payment confirmation taking longer than expected. Please try the manual check or try again.');
+                if (paymentWaitingText) {
+                    paymentWaitingText.innerHTML = 'Confirmation is taking longer than expected. You can try checking status manually below.';
+                }
+                document.getElementById('manualCheckBtn').style.display = 'inline-block';
+                return;
+            }
+            
             try {
-                var resp = await fetch('/v1/exit/payment-status/' + encodeURIComponent(plate));
+                var resp = await fetch('/v1/exit/refresh-payment-status/' + encodeURIComponent(plate), {
+                    method: 'POST'
+                });
                 var data = await resp.json();
                 if (data.payment_status === 'COMPLETED') {
-                    clearInterval(pollInterval); pollInterval = null;
+                    clearInterval(pollInterval);
+                    pollInterval = null;
                     document.getElementById('gateAmount').textContent = 'KES ' + (data.amount || amount).toLocaleString();
                     document.getElementById('gateRef').textContent = data.ref || ref;
                     document.getElementById('paymentSection').classList.add('hidden');
                     document.getElementById('gateSection').classList.remove('hidden');
+                    document.getElementById('manualCheckBtn').style.display = 'none';
+                    showAlert('alertSuccess', '✓ Payment received! Gate is now open.');
                 }
-            } catch(e) {}
-        }, 1000);
+            } catch(e) {
+                console.error('Payment status check error:', e);
+            }
+        }, POLL_INTERVAL);
+    }
+
+    async function manualCheckPayment() {
+        var btn = document.getElementById('manualCheckBtn');
+        var originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Checking...';
+        
+        try {
+            var resp = await fetch('/v1/exit/refresh-payment-status/' + encodeURIComponent(currentPlate), {
+                method: 'POST'
+            });
+            var data = await resp.json();
+            
+            if (data.payment_status === 'COMPLETED') {
+                if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+                document.getElementById('gateAmount').textContent = 'KES ' + (data.amount || 0).toLocaleString();
+                document.getElementById('gateRef').textContent = data.ref || '--';
+                document.getElementById('paymentSection').classList.add('hidden');
+                document.getElementById('gateSection').classList.remove('hidden');
+                showAlert('alertSuccess', 'Payment confirmed!');
+            } else {
+                showAlert('alertError', 'Payment not yet confirmed. Please wait a bit longer and try again.');
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        } catch(err) {
+            showAlert('alertError', 'Error checking payment status: ' + err.message);
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
     }
 
     function resetExit() {
         if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+        pollStartTime = null;
+        pollCount = 0;
         currentPlate = '';
         document.getElementById('lookupSection').classList.remove('hidden');
         ['summarySection','paymentSection','gateSection','freeExitSection'].forEach(function(id) {
@@ -376,6 +459,14 @@
         document.getElementById('exitDetectedBadge').style.display = 'none';
         var btn = document.getElementById('payBtn');
         if (btn) { btn.disabled = false; btn.textContent = 'Send M-Pesa STK Push'; }
+    }
+
+    function exitAndReset() {
+        resetExit();
+    }
+
+    function viewDashboard() {
+        window.location.href = '/admin';
     }
 
     document.getElementById('lookupForm').addEventListener('submit', handleLookup);

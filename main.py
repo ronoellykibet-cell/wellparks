@@ -24,14 +24,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-INTASEND_API_KEY   = os.environ.get("INTASEND_API_KEY", "")
-INTASEND_BASE_URL  = os.environ.get("INTASEND_BASE_URL", "https://sandbox.intasend.com")
-SMTP_USER          = os.environ.get("SMTP_USER", "")
-SMTP_PASSWORD      = os.environ.get("SMTP_PASSWORD", "")
-ADMIN_EMAIL        = "ronoellykibet@gmail.com"
+INTASEND_API_KEY    = os.environ.get("INTASEND_API_KEY", "")
+INTASEND_SECRET_KEY = os.environ.get("INTASEND_SECRET_KEY", "")
+INTASEND_BASE_URL   = os.environ.get("INTASEND_BASE_URL", "https://sandbox.intasend.com")
+SMTP_USER           = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD       = os.environ.get("SMTP_PASSWORD", "")
+ADMIN_EMAIL         = "ronoellykibet@gmail.com"
 DATABASE_PATH      = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wellparks.db")
 STATIC_DIR         = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-HOURLY_RATE        = 50
+HOURLY_RATE        = 10
 GRACE_MINUTES      = 0
 TOTAL_SPACES       = 500
 SESSION_HOURS      = 24
@@ -50,6 +51,23 @@ def get_db():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
+
+
+def format_mpesa_phone(phone: str) -> str:
+    if phone.startswith("0"):
+        return "254" + phone[1:]
+    if phone.startswith("+"):
+        return phone[1:]
+    return phone
+
+
+def get_intasend_key() -> str:
+    key = INTASEND_SECRET_KEY or INTASEND_API_KEY
+    if not key:
+        raise ValueError("IntaSend secret key is not configured")
+    if key.startswith("ISPubKey_"):
+        raise ValueError("Invalid IntaSend key: publishable key detected. Use INTASEND_SECRET_KEY with a secret key.")
+    return key
 
 
 def init_db():
@@ -144,6 +162,36 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+
+async def send_intasend_stk_push(phone: str, amount: int, narrative: str, api_ref: str):
+    key = get_intasend_key()
+    formatted_phone = format_mpesa_phone(phone)
+    if not formatted_phone.isdigit():
+        raise HTTPException(400, "Invalid phone number format")
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{INTASEND_BASE_URL}/api/v1/payment/mpesa-stk-push/",
+            json={"phone_number": formatted_phone, "amount": int(amount),
+                  "narrative": narrative, "api_ref": api_ref},
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            timeout=30,
+        )
+        resp_data = resp.json()
+        if resp.status_code not in (200, 201):
+            error_text = None
+            if isinstance(resp_data, dict):
+                error_text = resp_data.get("detail") or resp_data.get("error") or str(resp_data)
+            else:
+                error_text = str(resp_data)
+            raise HTTPException(resp.status_code if 400 <= resp.status_code < 600 else 502,
+                                f"IntaSend error: {error_text}")
+
+        invoice_id = resp_data.get("invoice", {}).get("invoice_id") or resp_data.get("id")
+        if not invoice_id:
+            raise HTTPException(502, "IntaSend did not return an invoice ID")
+        return invoice_id, resp_data
 
 
 async def send_email(to_email: str, subject: str, html_body: str):
@@ -274,10 +322,10 @@ async def poll_intasend_status():
             for txn in pending:
                 try:
                     async with httpx.AsyncClient() as client:
-                        resp = await client.get(
+                        resp = await client.post(
                             f"{INTASEND_BASE_URL}/api/v1/payment/status/",
-                            params={"invoice_id": txn["intasend_invoice_id"]},
-                            headers={"Authorization": f"Bearer {INTASEND_API_KEY}"},
+                            json={"invoice_id": txn["intasend_invoice_id"]},
+                            headers={"Authorization": f"Bearer {get_intasend_key()}"},
                             timeout=10,
                         )
                         if resp.status_code == 200:
@@ -295,17 +343,27 @@ async def poll_intasend_status():
                                     (txn["space_number"],),
                                 )
                                 conn2.commit()
+                                print(f"[Poll] Transaction {txn['id']} marked COMPLETED - plate: {txn['plate_number']}")
                                 conn2.close()
                                 asyncio.create_task(send_receipt_email(
                                     txn["driver_email"], txn["plate_number"],
                                     txn["entry_time"], txn["exit_time"],
                                     txn["duration_minutes"], txn["amount"], mpesa_ref,
                                 ))
+                            elif state == "FAILED":
+                                conn2 = get_db()
+                                conn2.execute(
+                                    "UPDATE transactions SET payment_status='FAILED', gate_status='CLOSED' WHERE id=?",
+                                    (txn["id"],),
+                                )
+                                conn2.commit()
+                                print(f"[Poll] Transaction {txn['id']} marked FAILED - plate: {txn['plate_number']}")
+                                conn2.close()
                 except Exception as e:
                     print(f"[Poll error txn {txn['id']}] {e}")
         except Exception as e:
             print(f"[Poll loop error] {e}")
-        await asyncio.sleep(3)
+        await asyncio.sleep(2)  # Poll more frequently - every 2 seconds instead of 3
 
 
 def get_session_admin(request: Request) -> Optional[str]:
@@ -356,6 +414,13 @@ class ExitLookupRequest(BaseModel):
 
 class PaymentInitRequest(BaseModel):
     plate_number: str
+
+
+class IntaSendTestPushRequest(BaseModel):
+    phone_number: str
+    amount: int
+    narrative: Optional[str] = None
+    api_ref: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -560,76 +625,105 @@ async def initiate_payment(req: PaymentInitRequest):
          duration_minutes, amount, ref, "PENDING", "CLOSED"),
     )
     conn.commit()
-    invoice_id = None
-    stk_error = None
-    if INTASEND_API_KEY:
-        try:
-            phone = space["driver_phone"]
-            if phone.startswith("0"):
-                phone = "254" + phone[1:]
-            elif phone.startswith("+"):
-                phone = phone[1:]
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    f"{INTASEND_BASE_URL}/api/v1/payment/mpesa-stk-push/",
-                    json={"phone_number": phone, "amount": int(amount),
-                          "narrative": f"WellParks Parking - {space['plate_number']}", "api_ref": ref},
-                    headers={"Authorization": f"Bearer {INTASEND_API_KEY}", "Content-Type": "application/json"},
-                    timeout=30,
-                )
-                resp_data = resp.json()
-                if resp.status_code in (200, 201):
-                    invoice_id = resp_data.get("invoice", {}).get("invoice_id") or resp_data.get("id")
-                    conn2 = get_db()
-                    conn2.execute("UPDATE transactions SET intasend_invoice_id=? WHERE transaction_ref=?",
-                                  (str(invoice_id), ref))
-                    conn2.commit()
-                    conn2.close()
-                else:
-                    stk_error = resp_data
-        except Exception as e:
-            stk_error = str(e)
+    try:
+        invoice_id, resp_data = await send_intasend_stk_push(
+            phone=space["driver_phone"],
+            amount=amount,
+            narrative=f"WellParks Parking - {space['plate_number']}",
+            api_ref=ref,
+        )
+    except ValueError as e:
+        conn.close()
+        raise HTTPException(500, str(e))
+    except HTTPException:
+        conn.close()
+        raise
+
+    conn2 = get_db()
+    conn2.execute("UPDATE transactions SET intasend_invoice_id=? WHERE transaction_ref=?",
+                  (str(invoice_id), ref))
+    conn2.commit()
+    conn2.close()
     conn.close()
     result = {"status": "stk_pushed", "ref": ref, "amount": amount,
-              "phone": space["driver_phone"], "plate": space["plate_number"]}
-    if invoice_id:
-        result["invoice_id"] = str(invoice_id)
-    if stk_error:
-        result["stk_error"] = str(stk_error)
+              "phone": space["driver_phone"], "plate": space["plate_number"],
+              "invoice_id": str(invoice_id)}
     return result
+
+
+@app.post("/v1/intasend/test-push")
+async def intasend_test_push(req: IntaSendTestPushRequest):
+    api_ref = req.api_ref or f"TEST-{uuid.uuid4().hex[:8].upper()}"
+    invoice_id, resp_data = await send_intasend_stk_push(
+        phone=req.phone_number,
+        amount=req.amount,
+        narrative=req.narrative or "WellParks M-Pesa STK Push Test",
+        api_ref=api_ref,
+    )
+    return {
+        "status": "stk_pushed",
+        "invoice_id": str(invoice_id),
+        "phone": req.phone_number,
+        "amount": req.amount,
+        "api_ref": api_ref,
+        "response": resp_data,
+    }
 
 
 @app.post("/v1/webhook/intasend")
 async def intasend_webhook(request: Request):
     try:
         body = await request.json()
-    except Exception:
+    except Exception as e:
+        print(f"[Webhook error] Failed to parse JSON: {e}")
         raise HTTPException(400, "Invalid JSON")
+    
     invoice_id = body.get("invoice_id") or body.get("invoice", {}).get("invoice_id")
     state = (body.get("state") or body.get("invoice", {}).get("state", "")).upper()
     mpesa_ref = body.get("mpesa_reference") or body.get("invoice", {}).get("mpesa_reference", "")
     api_ref = body.get("api_ref") or body.get("invoice", {}).get("api_ref", "")
+    
+    print(f"[Webhook received] invoice_id={invoice_id}, state={state}, api_ref={api_ref}, mpesa_ref={mpesa_ref}")
+    
     if state == "COMPLETE":
-        conn = get_db()
-        txn = None
-        if invoice_id:
-            txn = conn.execute("SELECT * FROM transactions WHERE intasend_invoice_id=?", (str(invoice_id),)).fetchone()
-        if not txn and api_ref:
-            txn = conn.execute("SELECT * FROM transactions WHERE transaction_ref=?", (api_ref,)).fetchone()
-        if txn and txn["payment_status"] != "COMPLETED":
-            final_ref = mpesa_ref or txn["transaction_ref"]
-            conn.execute("UPDATE transactions SET payment_status='COMPLETED', gate_status='OPEN', transaction_ref=? WHERE id=?",
-                         (final_ref, txn["id"]))
-            conn.execute("UPDATE spaces SET is_occupied=0, plate_number=NULL, driver_phone=NULL, driver_email=NULL, entry_time=NULL WHERE space_number=?",
-                         (txn["space_number"],))
-            conn.commit()
-            conn.close()
-            asyncio.create_task(send_receipt_email(
-                txn["driver_email"], txn["plate_number"], txn["entry_time"],
-                txn["exit_time"], txn["duration_minutes"], txn["amount"], final_ref,
-            ))
-        else:
-            conn.close()
+        conn = None
+        try:
+            conn = get_db()
+            txn = None
+            if invoice_id:
+                txn = conn.execute("SELECT * FROM transactions WHERE intasend_invoice_id=?", (str(invoice_id),)).fetchone()
+                print(f"[Webhook] Lookup by invoice_id: found={txn is not None}")
+            if not txn and api_ref:
+                txn = conn.execute("SELECT * FROM transactions WHERE transaction_ref=?", (api_ref,)).fetchone()
+                print(f"[Webhook] Lookup by api_ref: found={txn is not None}")
+            
+            if txn:
+                print(f"[Webhook] Transaction found: id={txn['id']}, payment_status={txn['payment_status']}, plate={txn['plate_number']}")
+                if txn["payment_status"] != "COMPLETED":
+                    final_ref = mpesa_ref or txn["transaction_ref"]
+                    print(f"[Webhook] Updating transaction {txn['id']} to COMPLETED with ref={final_ref}")
+                    conn.execute("UPDATE transactions SET payment_status='COMPLETED', gate_status='OPEN', transaction_ref=? WHERE id=?",
+                                 (final_ref, txn["id"]))
+                    conn.execute("UPDATE spaces SET is_occupied=0, plate_number=NULL, driver_phone=NULL, driver_email=NULL, entry_time=NULL WHERE space_number=?",
+                                 (txn["space_number"],))
+                    conn.commit()
+                    print(f"[Webhook] Transaction {txn['id']} committed successfully")
+                    asyncio.create_task(send_receipt_email(
+                        txn["driver_email"], txn["plate_number"], txn["entry_time"],
+                        txn["exit_time"], txn["duration_minutes"], txn["amount"], final_ref,
+                    ))
+                else:
+                    print(f"[Webhook] Transaction {txn['id']} already COMPLETED, skipping")
+            else:
+                print(f"[Webhook] No transaction found for invoice_id={invoice_id}, api_ref={api_ref}")
+        except Exception as e:
+            print(f"[Webhook error] Database operation failed: {e}", exc_info=True)
+        finally:
+            if conn:
+                conn.close()
+    else:
+        print(f"[Webhook] Ignoring non-COMPLETE state: {state}")
+    
     return {"status": "ok"}
 
 
@@ -641,6 +735,115 @@ async def payment_status(plate: str):
     conn.close()
     if not txn:
         raise HTTPException(404, "No transaction found")
+
+    if txn["payment_status"] != "COMPLETED" and txn["intasend_invoice_id"]:
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"{INTASEND_BASE_URL}/api/v1/payment/status/",
+                    params={"invoice_id": txn["intasend_invoice_id"]},
+                    headers={"Authorization": f"Bearer {get_intasend_key()}"},
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    state = data.get("invoice", {}).get("state", "").upper()
+                    if state == "COMPLETE":
+                        final_ref = data.get("invoice", {}).get("mpesa_reference", txn["transaction_ref"])
+                        conn2 = get_db()
+                        conn2.execute(
+                            "UPDATE transactions SET payment_status='COMPLETED', gate_status='OPEN', transaction_ref=? WHERE id=?",
+                            (final_ref, txn["id"]),
+                        )
+                        conn2.execute(
+                            "UPDATE spaces SET is_occupied=0, plate_number=NULL, driver_phone=NULL, driver_email=NULL, entry_time=NULL WHERE space_number=?",
+                            (txn["space_number"],),
+                        )
+                        conn2.commit()
+                        conn2.close()
+                        asyncio.create_task(send_receipt_email(
+                            txn["driver_email"], txn["plate_number"],
+                            txn["entry_time"], txn["exit_time"],
+                            txn["duration_minutes"], txn["amount"], final_ref,
+                        ))
+                        return {"payment_status": "COMPLETED", "gate_status": "OPEN",
+                                "amount": txn["amount"], "ref": final_ref}
+        except Exception as e:
+            print(f"[Payment status refresh] Failed to query IntaSend: {e}")
+
+    return {"payment_status": txn["payment_status"], "gate_status": txn["gate_status"],
+            "amount": txn["amount"], "ref": txn["transaction_ref"]}
+
+
+@app.post("/v1/exit/refresh-payment-status/{plate}")
+async def refresh_payment_status(plate: str):
+    """Manually refresh payment status from IntaSend - useful if polling times out"""
+    conn = get_db()
+    txn = conn.execute("SELECT * FROM transactions WHERE plate_number=? ORDER BY id DESC LIMIT 1",
+                       (plate.upper(),)).fetchone()
+    conn.close()
+    
+    if not txn:
+        raise HTTPException(404, "No transaction found")
+    
+    if txn["payment_status"] == "COMPLETED":
+        # Already completed
+        return {"payment_status": "COMPLETED", "gate_status": txn["gate_status"],
+                "amount": txn["amount"], "ref": txn["transaction_ref"]}
+    
+    # If no invoice ID, can't refresh
+    if not txn["intasend_invoice_id"]:
+        return {"payment_status": txn["payment_status"], "gate_status": txn["gate_status"],
+                "amount": txn["amount"], "ref": txn["transaction_ref"]}
+    
+    # Query IntaSend directly for latest status
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{INTASEND_BASE_URL}/api/v1/payment/status/",
+                json={"invoice_id": txn["intasend_invoice_id"]},
+                headers={"Authorization": f"Bearer {get_intasend_key()}"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                state = data.get("invoice", {}).get("state", "").upper()
+                if state == "COMPLETE":
+                    mpesa_ref = data.get("invoice", {}).get("mpesa_reference", txn["transaction_ref"])
+                    conn2 = get_db()
+                    conn2.execute(
+                        "UPDATE transactions SET payment_status='COMPLETED', gate_status='OPEN', transaction_ref=? WHERE id=?",
+                        (mpesa_ref, txn["id"]),
+                    )
+                    conn2.execute(
+                        "UPDATE spaces SET is_occupied=0, plate_number=NULL, driver_phone=NULL, driver_email=NULL, entry_time=NULL WHERE space_number=?",
+                        (txn["space_number"],),
+                    )
+                    conn2.commit()
+                    conn2.close()
+                    print(f"[Manual refresh] Transaction {txn['id']} marked COMPLETED")
+                    asyncio.create_task(send_receipt_email(
+                        txn["driver_email"], txn["plate_number"],
+                        txn["entry_time"], txn["exit_time"],
+                        txn["duration_minutes"], txn["amount"], mpesa_ref,
+                    ))
+                    return {"payment_status": "COMPLETED", "gate_status": "OPEN",
+                            "amount": txn["amount"], "ref": mpesa_ref}
+                elif state == "FAILED":
+                    conn2 = get_db()
+                    conn2.execute(
+                        "UPDATE transactions SET payment_status='FAILED', gate_status='CLOSED' WHERE id=?",
+                        (txn["id"],),
+                    )
+                    conn2.commit()
+                    conn2.close()
+                    print(f"[Manual refresh] Transaction {txn['id']} marked FAILED")
+                    return {"payment_status": "FAILED", "gate_status": "CLOSED",
+                            "amount": txn["amount"], "ref": txn["transaction_ref"]}
+    except Exception as e:
+        print(f"[Manual refresh error] Failed to query IntaSend: {e}")
+    
+    # Return current status
     return {"payment_status": txn["payment_status"], "gate_status": txn["gate_status"],
             "amount": txn["amount"], "ref": txn["transaction_ref"]}
 
