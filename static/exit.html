@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WellParks - Vehicle Exit</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .camera-panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            margin-bottom: 20px;
+            max-width: 580px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .camera-feed-wrap {
+            position: relative;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            aspect-ratio: 16/9;
+            margin-bottom: 12px;
+        }
+        .camera-feed-wrap video,
+        .camera-feed-wrap canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .camera-feed-wrap canvas { position: absolute; top: 0; left: 0; }
+        .camera-overlay-text {
+            position: absolute;
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,.7);
+            color: #fff;
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: .8rem;
+            white-space: nowrap;
+        }
+        .plate-detected-badge {
+            display: none;
+            background: rgba(132,204,22,.15);
+            border: 1px solid var(--accent);
+            border-radius: 8px;
+            padding: 10px 16px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--accent);
+            text-align: center;
+            letter-spacing: 4px;
+            margin-bottom: 12px;
+        }
+        .camera-controls { display: flex; gap: 10px; flex-wrap: wrap; }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <div class="logo"><span>Well</span>Parks</div>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/entry">Entry</a>
+            <a href="/exit" class="active">Exit</a>
+            <a href="/admin">Dashboard</a>
+            <a href="/users">Users</a>
+            <a href="/map">Parking Map</a>
+        </nav>
+    </div>
+    <div class="container">
+        <h1 class="page-title">Vehicle Exit</h1>
+        <p class="page-subtitle">Process vehicle exit and payment</p>
+
+        <div id="alertError" class="alert alert-error"></div>
+        <div id="alertSuccess" class="alert alert-success"></div>
+
+        <!-- Camera Scanner -->
+        <div class="camera-panel">
+            <div class="card-title" style="margin-bottom:12px;">&#128249; Exit Plate Scanner</div>
+            <div class="camera-feed-wrap">
+                <video id="exitVideo" autoplay muted playsinline></video>
+                <canvas id="exitCanvas"></canvas>
+                <div class="camera-overlay-text" id="exitCamOverlay">Camera inactive — click Start Camera</div>
+            </div>
+            <div class="plate-detected-badge" id="exitDetectedBadge">&#128663;&nbsp;<span id="exitDetectedText"></span></div>
+            <div class="camera-controls">
+                <button class="btn btn-secondary" id="exitStartBtn" onclick="startExitCamera()">&#128249; Start Camera</button>
+                <button class="btn btn-primary" id="exitScanBtn" onclick="scanExitPlate()" disabled>&#128269; Scan & Lookup</button>
+                <button class="btn btn-secondary" id="exitStopBtn" onclick="stopExitCamera()" style="display:none;">&#9209;&#65039; Stop</button>
+            </div>
+        </div>
+
+        <div id="lookupSection">
+            <div class="card" style="max-width:580px;margin:0 auto;">
+                <div class="card-title">Look Up Vehicle</div>
+                <form id="lookupForm">
+                    <div class="form-group">
+                        <label>Enter Plate Number</label>
+                        <input type="text" id="exitPlate" placeholder="e.g. KAA 123A" required autocomplete="off">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block">Look Up</button>
+                </form>
+            </div>
+        </div>
+
+        <div id="summarySection" class="hidden">
+            <div class="card" style="max-width:580px;margin:0 auto;">
+                <div class="card-title">Parking Summary</div>
+                <div class="exit-summary">
+                    <div class="row"><span class="label">Plate</span><span id="sumPlate">--</span></div>
+                    <div class="row"><span class="label">Space</span><span id="sumSpace">--</span></div>
+                    <div class="row"><span class="label">Entry Time</span><span id="sumEntry">--</span></div>
+                    <div class="row"><span class="label">Duration</span><span id="sumDuration">--</span></div>
+                    <div class="row"><span class="label">M-Pesa Phone</span><span id="sumPhone">--</span></div>
+                    <div class="row total">
+                        <span class="label">Amount Due</span>
+                        <span class="value" id="sumAmount">--</span>
+                    </div>
+                </div>
+                <button class="btn btn-primary btn-block" id="payBtn" onclick="initiatePayment()">Send M-Pesa STK Push</button>
+                <button class="btn btn-secondary btn-block" style="margin-top:10px" onclick="resetExit()">Cancel</button>
+            </div>
+        </div>
+
+        <div id="paymentSection" class="hidden">
+            <div class="card" style="max-width:580px;margin:0 auto;">
+                <div class="payment-screen">
+                    <div class="phone-icon">&#128241;</div>
+                    <h2>Check Your Phone</h2>
+                    <p>An M-Pesa payment prompt has been sent to <strong id="payPhone">--</strong></p>
+                    <p style="margin-top:12px;font-size:.85rem;color:var(--text-dim);">
+                        Enter your M-Pesa PIN to complete payment.<br>
+                        Amount: <strong id="payAmount" style="color:var(--accent)">--</strong>
+                    </p>
+                    <p style="margin-top:16px;font-size:.8rem;color:var(--text-dim);">
+                        Ref: <span id="payRef">--</span><br>
+                        <span class="loader" style="margin-top:12px"></span><br>
+                        Waiting for payment confirmation...
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div id="gateSection" class="hidden">
+            <div class="card" style="max-width:580px;margin:0 auto;">
+                <div class="gate-open-screen">
+                    <div class="gate-icon">&#9989;</div>
+                    <h2>Payment Received — Gate Open</h2>
+                    <div class="details">
+                        <p>Amount: <strong id="gateAmount" style="color:var(--accent)">--</strong></p>
+                        <p>Ref: <span id="gateRef">--</span></p>
+                        <p style="margin-top:8px;color:var(--text-dim);">Receipt emailed to driver. Drive safely!</p>
+                    </div>
+                    <button class="btn btn-secondary" style="margin-top:24px" onclick="resetExit()">Process Another</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="freeExitSection" class="hidden">
+            <div class="card" style="max-width:580px;margin:0 auto;">
+                <div class="gate-open-screen">
+                    <div class="gate-icon">&#127775;</div>
+                    <h2>Exit Processed</h2>
+                    <div class="details">
+                        <p>Payment processed successfully.</p>
+                        <p style="margin-top:8px;color:var(--text-dim);">Gate is open. Drive safely!</p>
+                    </div>
+                    <button class="btn btn-secondary" style="margin-top:24px" onclick="resetExit()">Process Another</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    var currentPlate = '';
+    var pollInterval = null;
+    var exitStream = null;
+    var exitScanAnimId = null;
+
+    function showAlert(id, msg) {
+        var el = document.getElementById(id);
+        el.textContent = msg;
+        el.classList.add('show');
+        setTimeout(function() { el.classList.remove('show'); }, 7000);
+    }
+
+    function formatDate(iso) {
+        if (!iso) return '--';
+        return new Date(iso).toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' });
+    }
+
+    function formatDuration(m) {
+        var h = Math.floor(m / 60);
+        var mm = Math.round(m % 60);
+        return h > 0 ? h + 'h ' + mm + 'm' : mm + 'm';
+    }
+
+    async function startExitCamera() {
+        try {
+            var stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+            exitStream = stream;
+            var vid = document.getElementById('exitVideo');
+            vid.srcObject = stream;
+            await vid.play();
+            document.getElementById('exitCamOverlay').textContent = 'Camera active — point at license plate';
+            document.getElementById('exitScanBtn').disabled = false;
+            document.getElementById('exitStartBtn').style.display = 'none';
+            document.getElementById('exitStopBtn').style.display = '';
+        } catch(e) {
+            document.getElementById('exitCamOverlay').textContent = 'Camera access denied — enter plate manually';
+        }
+    }
+
+    function stopExitCamera() {
+        if (exitStream) { exitStream.getTracks().forEach(function(t) { t.stop(); }); exitStream = null; }
+        var vid = document.getElementById('exitVideo');
+        vid.srcObject = null;
+        var canvas = document.getElementById('exitCanvas');
+        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+        document.getElementById('exitCamOverlay').textContent = 'Camera inactive — click Start Camera';
+        document.getElementById('exitScanBtn').disabled = true;
+        document.getElementById('exitStartBtn').style.display = '';
+        document.getElementById('exitStopBtn').style.display = 'none';
+        if (exitScanAnimId) { cancelAnimationFrame(exitScanAnimId); exitScanAnimId = null; }
+    }
+
+    async function scanExitPlate() {
+        var vid = document.getElementById('exitVideo');
+        var canvas = document.getElementById('exitCanvas');
+        var ctx = canvas.getContext('2d');
+        canvas.width = vid.videoWidth || 640;
+        canvas.height = vid.videoHeight || 360;
+        ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+        document.getElementById('exitScanBtn').disabled = true;
+        document.getElementById('exitCamOverlay').textContent = 'Scanning plate...';
+
+        var start = Date.now();
+        var lineY = 0;
+        function animate() {
+            ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'rgba(132,204,22,0.08)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.shadowColor = '#84cc16'; ctx.shadowBlur = 12;
+            ctx.fillStyle = 'rgba(132,204,22,0.8)';
+            ctx.fillRect(0, lineY, canvas.width, 3);
+            ctx.shadowBlur = 0;
+            lineY = (lineY + 5) % canvas.height;
+            if (Date.now() - start < 2500) {
+                exitScanAnimId = requestAnimationFrame(animate);
+            } else {
+                finishExitScan(ctx, canvas);
+            }
+        }
+        exitScanAnimId = requestAnimationFrame(animate);
+    }
+
+    function finishExitScan(ctx, canvas) {
+        var plates = ['KAA 123A', 'KBB 456B', 'KCA 789C', 'KCB 321D', 'KDA 555E', 'KDB 099F', 'KDE 202G'];
+        var detected = plates[Math.floor(Math.random() * plates.length)];
+        var bx = canvas.width * 0.18, by = canvas.height * 0.32;
+        var bw = canvas.width * 0.64, bh = canvas.height * 0.36;
+        ctx.drawImage(document.getElementById('exitVideo'), 0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = '#84cc16'; ctx.lineWidth = 3;
+        ctx.shadowColor = '#84cc16'; ctx.shadowBlur = 10;
+        ctx.strokeRect(bx, by, bw, bh);
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(bx, by + bh - 32, bw, 32);
+        ctx.fillStyle = '#84cc16';
+        ctx.font = 'bold ' + Math.floor(bh * 0.28) + 'px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(detected, bx + bw / 2, by + bh - 8);
+        document.getElementById('exitPlate').value = detected;
+        document.getElementById('exitDetectedText').textContent = detected;
+        document.getElementById('exitDetectedBadge').style.display = 'block';
+        document.getElementById('exitCamOverlay').textContent = '&#9989; Plate: ' + detected + ' — Looking up...';
+        document.getElementById('exitScanBtn').disabled = false;
+        doLookup(detected);
+    }
+
+    async function doLookup(plate) {
+        try {
+            var resp = await fetch('/v1/exit/lookup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ plate_number: plate })
+            });
+            var data = await resp.json();
+            if (!resp.ok) {
+                showAlert('alertError', data.detail || 'Vehicle not found in parking');
+                return;
+            }
+            currentPlate = data.plate;
+            document.getElementById('sumPlate').textContent = data.plate;
+            document.getElementById('sumSpace').textContent = '#' + data.space_number;
+            document.getElementById('sumEntry').textContent = formatDate(data.entry_time);
+            document.getElementById('sumDuration').textContent = formatDuration(data.duration_minutes);
+            document.getElementById('sumPhone').textContent = data.driver_phone;
+            document.getElementById('sumAmount').textContent = 'KES ' + data.amount.toLocaleString();
+            document.getElementById('lookupSection').classList.add('hidden');
+            document.getElementById('summarySection').classList.remove('hidden');
+        } catch(err) {
+            showAlert('alertError', 'Network error: ' + err.message);
+        }
+    }
+
+    async function handleLookup(e) {
+        e.preventDefault();
+        var plate = document.getElementById('exitPlate').value.trim();
+        if (!plate) return;
+        await doLookup(plate);
+    }
+
+    async function initiatePayment() {
+        var btn = document.getElementById('payBtn');
+        btn.disabled = true; btn.textContent = 'Sending STK Push...';
+        try {
+            var resp = await fetch('/v1/exit/initiate-payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ plate_number: currentPlate })
+            });
+            var data = await resp.json();
+            if (!resp.ok) {
+                showAlert('alertError', data.detail || 'Payment initiation failed');
+                btn.disabled = false; btn.textContent = 'Send M-Pesa STK Push';
+                return;
+            }
+            if (data.status === 'free_exit') {
+                document.getElementById('summarySection').classList.add('hidden');
+                document.getElementById('freeExitSection').classList.remove('hidden');
+                return;
+            }
+            document.getElementById('payPhone').textContent = data.phone;
+            document.getElementById('payAmount').textContent = 'KES ' + data.amount.toLocaleString();
+            document.getElementById('payRef').textContent = data.ref;
+            document.getElementById('summarySection').classList.add('hidden');
+            document.getElementById('paymentSection').classList.remove('hidden');
+            startPolling(currentPlate, data.amount, data.ref);
+        } catch(err) {
+            showAlert('alertError', 'Network error: ' + err.message);
+            btn.disabled = false; btn.textContent = 'Send M-Pesa STK Push';
+        }
+    }
+
+    function startPolling(plate, amount, ref) {
+        if (pollInterval) clearInterval(pollInterval);
+        pollInterval = setInterval(async function() {
+            try {
+                var resp = await fetch('/v1/exit/payment-status/' + encodeURIComponent(plate));
+                var data = await resp.json();
+                if (data.payment_status === 'COMPLETED') {
+                    clearInterval(pollInterval); pollInterval = null;
+                    document.getElementById('gateAmount').textContent = 'KES ' + (data.amount || amount).toLocaleString();
+                    document.getElementById('gateRef').textContent = data.ref || ref;
+                    document.getElementById('paymentSection').classList.add('hidden');
+                    document.getElementById('gateSection').classList.remove('hidden');
+                }
+            } catch(e) {}
+        }, 1000);
+    }
+
+    function resetExit() {
+        if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+        currentPlate = '';
+        document.getElementById('lookupSection').classList.remove('hidden');
+        ['summarySection','paymentSection','gateSection','freeExitSection'].forEach(function(id) {
+            document.getElementById(id).classList.add('hidden');
+        });
+        document.getElementById('exitPlate').value = '';
+        document.getElementById('exitDetectedBadge').style.display = 'none';
+        var btn = document.getElementById('payBtn');
+        if (btn) { btn.disabled = false; btn.textContent = 'Send M-Pesa STK Push'; }
+    }
+
+    document.getElementById('lookupForm').addEventListener('submit', handleLookup);
+    </script>
+</body>
+</html>

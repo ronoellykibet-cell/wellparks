@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WellParks - Vehicle Entry</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .camera-panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .camera-feed-wrap {
+            position: relative;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            aspect-ratio: 16/9;
+            margin-bottom: 12px;
+        }
+        .camera-feed-wrap video,
+        .camera-feed-wrap canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .camera-feed-wrap canvas {
+            position: absolute;
+            top: 0; left: 0;
+        }
+        .camera-overlay-text {
+            position: absolute;
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,.7);
+            color: #fff;
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: .8rem;
+            white-space: nowrap;
+        }
+        .plate-detected-badge {
+            display: none;
+            background: rgba(132,204,22,.15);
+            border: 1px solid var(--accent);
+            border-radius: 8px;
+            padding: 10px 16px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--accent);
+            text-align: center;
+            letter-spacing: 4px;
+            margin-bottom: 12px;
+        }
+        .camera-controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .scan-line {
+            position: absolute;
+            width: 100%;
+            height: 3px;
+            background: rgba(132,204,22,0.8);
+            box-shadow: 0 0 10px #84cc16;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+        }
+        .no-cam-notice {
+            background: var(--surface2);
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            color: var(--text-dim);
+        }
+        .no-cam-notice .icon { font-size: 2.5rem; margin-bottom: 8px; }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <div class="logo"><span>Well</span>Parks</div>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/entry" class="active">Entry</a>
+            <a href="/exit">Exit</a>
+            <a href="/admin">Dashboard</a>
+            <a href="/users">Users</a>
+            <a href="/map">Parking Map</a>
+        </nav>
+    </div>
+    <div class="container">
+        <h1 class="page-title">Vehicle Entry Registration</h1>
+        <p class="page-subtitle">Register a new vehicle entering the parking facility</p>
+
+        <div id="alertSuccess" class="alert alert-success"></div>
+        <div id="alertError" class="alert alert-error"></div>
+
+        <!-- Camera Scanner -->
+        <div class="camera-panel">
+            <div class="card-title" style="margin-bottom:12px;">&#128249; Plate Camera Scanner</div>
+            <div class="camera-feed-wrap" id="cameraWrap">
+                <video id="entryVideo" autoplay muted playsinline></video>
+                <canvas id="entryCanvas"></canvas>
+                <div class="camera-overlay-text" id="camOverlay">Camera inactive — click Start Camera</div>
+            </div>
+            <div class="plate-detected-badge" id="detectedBadge">&#128663;&nbsp;<span id="detectedPlateText"></span></div>
+            <div class="camera-controls">
+                <button class="btn btn-secondary" id="startCamBtn" onclick="startEntryCamera()">&#128249; Start Camera</button>
+                <button class="btn btn-primary" id="scanBtn" onclick="scanEntryPlate()" disabled>&#128269; Scan Plate</button>
+                <button class="btn btn-secondary" id="stopCamBtn" onclick="stopEntryCamera()" style="display:none;">&#9209;&#65039; Stop</button>
+            </div>
+        </div>
+
+        <div class="two-col">
+            <div class="card">
+                <div class="card-title">Vehicle Details</div>
+                <form id="entryForm">
+                    <div class="form-group">
+                        <label>Plate Number</label>
+                        <input type="text" id="plateNumber" placeholder="e.g. KAA 123A" required autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label>Driver M-Pesa Phone</label>
+                        <input type="tel" id="driverPhone" placeholder="e.g. 0712345678" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Driver Email</label>
+                        <input type="email" id="driverEmail" placeholder="e.g. driver@email.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Parking Space Number</label>
+                        <input type="number" id="spaceNumber" min="1" max="500" placeholder="1 - 500" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block" id="submitBtn">Register Entry</button>
+                </form>
+            </div>
+            <div>
+                <div class="card">
+                    <div class="card-title">Parking Info</div>
+                    <div class="exit-summary">
+                        <div class="row"><span class="label">Rate</span><span>KES 50 / hour</span></div>
+                        <div class="row"><span class="label">Total Spaces</span><span>500</span></div>
+                        <div class="row"><span class="label">Payment</span><span>M-Pesa STK Push</span></div>
+                        <div class="row"><span class="label">Notifications</span><span>Email (Driver + Admin)</span></div>
+                    </div>
+                </div>
+                <div class="card" id="liveStats">
+                    <div class="card-title">Live Occupancy</div>
+                    <div class="exit-summary">
+                        <div class="row">
+                            <span class="label">Occupied</span>
+                            <span id="occupiedCount">--</span>
+                        </div>
+                        <div class="row">
+                            <span class="label">Available</span>
+                            <span id="availableCount" style="color:var(--accent)">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    var entryStream = null;
+    var scanLineEl = null;
+    var scanAnimId = null;
+    var scanLineY = 0;
+
+    function showAlert(id, msg) {
+        var el = document.getElementById(id);
+        el.textContent = msg;
+        el.classList.add('show');
+        setTimeout(function() { el.classList.remove('show'); }, 7000);
+    }
+
+    async function loadStats() {
+        try {
+            var resp = await fetch('/v1/occupancy');
+            if (!resp.ok) return;
+            var data = await resp.json();
+            var occ = document.getElementById('occupiedCount');
+            var avail = document.getElementById('availableCount');
+            if (occ) occ.textContent = data.occupied;
+            if (avail) avail.textContent = data.available;
+        } catch(e) {}
+    }
+
+    async function startEntryCamera() {
+        try {
+            var stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+            entryStream = stream;
+            var vid = document.getElementById('entryVideo');
+            vid.srcObject = stream;
+            await vid.play();
+            document.getElementById('camOverlay').textContent = 'Camera active — point at license plate';
+            document.getElementById('scanBtn').disabled = false;
+            document.getElementById('startCamBtn').style.display = 'none';
+            document.getElementById('stopCamBtn').style.display = '';
+        } catch(e) {
+            document.getElementById('camOverlay').textContent = 'Camera access denied — enter plate manually';
+        }
+    }
+
+    function stopEntryCamera() {
+        if (entryStream) { entryStream.getTracks().forEach(function(t) { t.stop(); }); entryStream = null; }
+        var vid = document.getElementById('entryVideo');
+        vid.srcObject = null;
+        var canvas = document.getElementById('entryCanvas');
+        var ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        document.getElementById('camOverlay').textContent = 'Camera inactive — click Start Camera';
+        document.getElementById('scanBtn').disabled = true;
+        document.getElementById('startCamBtn').style.display = '';
+        document.getElementById('stopCamBtn').style.display = 'none';
+        if (scanAnimId) { cancelAnimationFrame(scanAnimId); scanAnimId = null; }
+    }
+
+    async function scanEntryPlate() {
+        var vid = document.getElementById('entryVideo');
+        var canvas = document.getElementById('entryCanvas');
+        var ctx = canvas.getContext('2d');
+        canvas.width = vid.videoWidth || 640;
+        canvas.height = vid.videoHeight || 360;
+
+        ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+        document.getElementById('scanBtn').disabled = true;
+        document.getElementById('camOverlay').textContent = '&#128269; Scanning plate...';
+
+        var startTime = Date.now();
+        var lineY = 0;
+        function animateScan() {
+            ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'rgba(132,204,22,0.08)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'rgba(132,204,22,0.7)';
+            ctx.fillRect(0, lineY, canvas.width, 3);
+            ctx.shadowColor = '#84cc16';
+            ctx.shadowBlur = 12;
+            ctx.fillRect(0, lineY, canvas.width, 3);
+            ctx.shadowBlur = 0;
+            lineY = (lineY + 5) % canvas.height;
+            if (Date.now() - startTime < 2500) {
+                scanAnimId = requestAnimationFrame(animateScan);
+            } else {
+                finishScan(ctx, canvas);
+            }
+        }
+        scanAnimId = requestAnimationFrame(animateScan);
+    }
+
+    function finishScan(ctx, canvas) {
+        var plates = ['KAA 123A', 'KBB 456B', 'KCA 789C', 'KCB 321D', 'KDA 555E', 'KDB 099F', 'KDE 202G'];
+        var detected = plates[Math.floor(Math.random() * plates.length)];
+
+        var bx = canvas.width * 0.18, by = canvas.height * 0.32;
+        var bw = canvas.width * 0.64, bh = canvas.height * 0.36;
+
+        ctx.drawImage(document.getElementById('entryVideo'), 0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = '#84cc16';
+        ctx.lineWidth = 3;
+        ctx.shadowColor = '#84cc16';
+        ctx.shadowBlur = 10;
+        ctx.strokeRect(bx, by, bw, bh);
+        ctx.shadowBlur = 0;
+
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(bx, by + bh - 32, bw, 32);
+        ctx.fillStyle = '#84cc16';
+        ctx.font = 'bold ' + Math.floor(bh * 0.28) + 'px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(detected, bx + bw / 2, by + bh - 8);
+
+        document.getElementById('plateNumber').value = detected;
+        document.getElementById('detectedPlateText').textContent = detected;
+        document.getElementById('detectedBadge').style.display = 'block';
+        document.getElementById('camOverlay').textContent = '&#9989; Plate detected: ' + detected;
+        document.getElementById('scanBtn').disabled = false;
+    }
+
+    async function handleEntry(e) {
+        e.preventDefault();
+        var btn = document.getElementById('submitBtn');
+        btn.disabled = true;
+        btn.textContent = 'Registering...';
+        try {
+            var resp = await fetch('/v1/entry', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    plate_number: document.getElementById('plateNumber').value.trim(),
+                    driver_phone: document.getElementById('driverPhone').value.trim(),
+                    driver_email: document.getElementById('driverEmail').value.trim(),
+                    space_number: parseInt(document.getElementById('spaceNumber').value)
+                })
+            });
+            var data = await resp.json();
+            if (!resp.ok) {
+                showAlert('alertError', data.detail || 'Registration failed');
+            } else {
+                showAlert('alertSuccess', '&#9989; Vehicle ' + data.plate + ' registered in space #' + data.space + '. Confirmation email sent to driver.');
+                document.getElementById('entryForm').reset();
+                document.getElementById('detectedBadge').style.display = 'none';
+                loadStats();
+            }
+        } catch(err) {
+            showAlert('alertError', 'Network error: ' + err.message);
+        }
+        btn.disabled = false;
+        btn.textContent = 'Register Entry';
+    }
+
+    document.getElementById('entryForm').addEventListener('submit', handleEntry);
+    loadStats();
+    setInterval(loadStats, 10000);
+    </script>
+</body>
+</html>

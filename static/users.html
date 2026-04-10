@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WellParks - User Management</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .user-controls {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .user-controls input,
+        .user-controls select {
+            padding: 10px 14px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-size: .9rem;
+            font-family: var(--font);
+        }
+        .user-controls input { flex: 1; min-width: 200px; }
+        .user-controls input:focus, .user-controls select:focus {
+            outline: none; border-color: var(--accent);
+        }
+        .user-avatar {
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            background: var(--surface2);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--accent);
+            flex-shrink: 0;
+        }
+        .user-info { min-width: 0; }
+        .user-name { font-weight: 600; font-size: .95rem; }
+        .user-email { font-size: .8rem; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .action-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: .8rem;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: var(--font);
+            font-weight: 600;
+            transition: all .2s;
+        }
+        .btn-sm-primary { background: var(--accent); color: #0f1221; }
+        .btn-sm-primary:hover { background: var(--accent-dim); }
+        .btn-sm-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+        .btn-sm-secondary:hover { border-color: var(--accent); }
+        .btn-sm-danger { background: rgba(239,68,68,.15); color: var(--danger); border: 1px solid rgba(239,68,68,.3); }
+        .btn-sm-danger:hover { background: var(--danger); color: #fff; }
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,.75);
+            display: none; align-items: center; justify-content: center;
+            z-index: 300;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal-box {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 32px;
+            width: 100%; max-width: 480px;
+            position: relative;
+        }
+        .modal-title { color: var(--accent); font-size: 1.1rem; font-weight: 700; margin-bottom: 20px; }
+        .modal-close {
+            position: absolute; top: 14px; right: 18px;
+            background: none; border: none; color: var(--text-dim);
+            font-size: 1.4rem; cursor: pointer;
+        }
+        .modal-close:hover { color: var(--text); }
+        .confirm-modal {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 32px;
+            width: 100%; max-width: 400px;
+            text-align: center;
+        }
+        .confirm-icon { font-size: 3rem; margin-bottom: 12px; }
+        .confirm-title { font-size: 1.2rem; font-weight: 700; margin-bottom: 8px; }
+        .confirm-sub { color: var(--text-dim); font-size: .9rem; margin-bottom: 24px; }
+        .msg-textarea {
+            width: 100%; min-height: 110px;
+            padding: 12px; background: var(--bg);
+            border: 1px solid var(--border); border-radius: 8px;
+            color: var(--text); font-size: .95rem;
+            font-family: var(--font); resize: vertical;
+        }
+        .msg-textarea:focus { outline: none; border-color: var(--accent); }
+        .user-summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .user-summary-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+            text-align: center;
+        }
+        .user-summary-card .val { font-size: 1.6rem; font-weight: 700; color: var(--accent); }
+        .user-summary-card .lbl { font-size: .78rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px; margin-top: 4px; }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-dim);
+        }
+        .empty-state .icon { font-size: 3rem; margin-bottom: 12px; }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <div class="logo"><span>Well</span>Parks</div>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/entry">Entry</a>
+            <a href="/exit">Exit</a>
+            <a href="/admin">Dashboard</a>
+            <a href="/users" class="active">Users</a>
+            <a href="/map">Parking Map</a>
+        </nav>
+    </div>
+    <div class="container">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:8px;">
+            <div>
+                <h1 class="page-title" style="margin-bottom:0;">User Management</h1>
+                <p class="page-subtitle" style="margin-bottom:0;">All registered drivers and parking history</p>
+            </div>
+            <div>
+                <button class="btn btn-secondary" style="padding:8px 16px;font-size:.85rem;" onclick="exportCSV()">&#128190; Export CSV</button>
+            </div>
+        </div>
+
+        <div id="alertSuccess" class="alert alert-success" style="margin-top:16px;"></div>
+        <div id="alertError" class="alert alert-error" style="margin-top:16px;"></div>
+
+        <div class="user-summary-cards" id="summaryCards">
+            <div class="user-summary-card"><div class="val" id="sumTotal">--</div><div class="lbl">Total Drivers</div></div>
+            <div class="user-summary-card"><div class="val" id="sumParked" style="color:var(--warning)">--</div><div class="lbl">Currently Parked</div></div>
+            <div class="user-summary-card"><div class="val" id="sumRevenue">--</div><div class="lbl">Total Spent (KES)</div></div>
+        </div>
+
+        <div class="card">
+            <div class="user-controls">
+                <input type="text" id="searchInput" placeholder="&#128269; Search by plate, email or phone..." oninput="filterUsers()">
+                <select id="statusFilter" onchange="filterUsers()">
+                    <option value="all">All Drivers</option>
+                    <option value="parked">Currently Parked</option>
+                    <option value="exited">Past Drivers</option>
+                </select>
+                <button class="btn btn-secondary" style="padding:10px 16px;font-size:.85rem;" onclick="loadUsers()">&#8635; Refresh</button>
+            </div>
+
+            <div style="overflow-x:auto">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Driver</th>
+                            <th>Plate</th>
+                            <th>Phone</th>
+                            <th>Visits</th>
+                            <th>Total Spent</th>
+                            <th>Last Visit</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersTable">
+                        <tr><td colspan="8" style="text-align:center;color:var(--text-dim);padding:30px;">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="usersEmpty" class="empty-state" style="display:none;">
+                <div class="icon">&#128664;</div>
+                <div>No drivers found</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Message Modal -->
+    <div class="modal-overlay" id="msgModal">
+        <div class="modal-box">
+            <button class="modal-close" onclick="closeModal('msgModal')">&times;</button>
+            <div class="modal-title">&#128233; Send Message to Driver</div>
+            <div class="form-group">
+                <label>To</label>
+                <input type="text" id="modalToEmail" readonly style="background:var(--surface2);cursor:default;">
+            </div>
+            <div class="form-group">
+                <label>Plate</label>
+                <input type="text" id="modalToPlate" readonly style="background:var(--surface2);cursor:default;">
+            </div>
+            <div class="form-group">
+                <label>Subject</label>
+                <input type="text" id="modalSubject" placeholder="Message subject..." maxlength="100">
+            </div>
+            <div class="form-group">
+                <label>Message</label>
+                <textarea class="msg-textarea" id="modalBody" placeholder="Type your message here..."></textarea>
+            </div>
+            <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px;">
+                <button class="btn btn-secondary" onclick="closeModal('msgModal')">Cancel</button>
+                <button class="btn btn-primary" id="sendMsgBtn" onclick="sendMsg()">&#128233; Send Email</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirm Delete Modal -->
+    <div class="modal-overlay" id="deleteModal">
+        <div class="confirm-modal">
+            <div class="confirm-icon">&#9888;&#65039;</div>
+            <div class="confirm-title">Remove Driver Record</div>
+            <div class="confirm-sub">
+                This will remove all parking records for <strong id="deletePlateName">--</strong>.<br>
+                This action cannot be undone.
+            </div>
+            <div style="display:flex;gap:10px;justify-content:center;">
+                <button class="btn btn-secondary" onclick="closeModal('deleteModal')">Cancel</button>
+                <button class="btn btn-danger" id="confirmDeleteBtn" onclick="confirmDelete()">Delete Records</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    var allUsers = [];
+    var pendingDeletePlate = '';
+
+    function showAlert(id, msg) {
+        var el = document.getElementById(id);
+        el.textContent = msg;
+        el.classList.add('show');
+        setTimeout(function() { el.classList.remove('show'); }, 7000);
+    }
+
+    function formatDate(iso) {
+        if (!iso) return '--';
+        return new Date(iso).toLocaleString('en-KE', { dateStyle: 'short', timeStyle: 'short' });
+    }
+
+    async function checkAuth() {
+        try {
+            var resp = await fetch('/v1/auth/me');
+            if (!resp.ok) window.location.href = '/login';
+        } catch(e) { window.location.href = '/login'; }
+    }
+
+    async function loadUsers() {
+        var status = document.getElementById('statusFilter').value;
+        var search = document.getElementById('searchInput').value.trim();
+        try {
+            var url = '/v1/admin/users?status=' + status + (search ? '&search=' + encodeURIComponent(search) : '');
+            var resp = await fetch(url);
+            if (resp.status === 401) { window.location.href = '/login'; return; }
+            allUsers = await resp.json();
+            renderUsers(allUsers);
+            updateSummary(allUsers);
+        } catch(e) {
+            document.getElementById('usersTable').innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger)">Failed to load users</td></tr>';
+        }
+    }
+
+    function updateSummary(users) {
+        document.getElementById('sumTotal').textContent = users.length;
+        document.getElementById('sumParked').textContent = users.filter(function(u) { return u.currently_parked; }).length;
+        var total = users.reduce(function(acc, u) { return acc + (u.total_spent || 0); }, 0);
+        document.getElementById('sumRevenue').textContent = total.toLocaleString();
+    }
+
+    function renderUsers(users) {
+        var tbody = document.getElementById('usersTable');
+        var empty = document.getElementById('usersEmpty');
+        if (!users.length) {
+            tbody.innerHTML = '';
+            empty.style.display = 'block';
+            return;
+        }
+        empty.style.display = 'none';
+        tbody.innerHTML = users.map(function(u) {
+            var initial = (u.driver_email || 'U')[0].toUpperCase();
+            var statusBadge = u.currently_parked
+                ? '<span class="badge badge-warning">Parked #' + (u.current_space || '') + '</span>'
+                : '<span class="badge" style="background:rgba(148,163,184,.1);color:var(--text-dim)">Past</span>';
+            return '<tr>' +
+                '<td><div style="display:flex;align-items:center;gap:10px;">' +
+                '<div class="user-avatar">' + initial + '</div>' +
+                '<div class="user-info"><div class="user-name">' + (u.driver_email || '--') + '</div></div>' +
+                '</div></td>' +
+                '<td><code style="color:var(--accent);font-size:.9rem;">' + (u.plate_number || '--') + '</code></td>' +
+                '<td style="color:var(--text-dim)">' + (u.driver_phone || '--') + '</td>' +
+                '<td><span class="badge badge-info">' + (u.total_visits || 0) + '</span></td>' +
+                '<td style="color:var(--accent)">KES ' + (u.total_spent || 0).toLocaleString() + '</td>' +
+                '<td style="color:var(--text-dim);font-size:.85rem;">' + formatDate(u.last_visit) + '</td>' +
+                '<td>' + statusBadge + '</td>' +
+                '<td><div class="action-btns">' +
+                '<button class="btn-sm btn-sm-primary" onclick="openMsg(\'' + u.driver_email + '\',\'' + (u.plate_number || '') + '\')">&#128233; Msg</button>' +
+                '<button class="btn-sm btn-sm-danger" onclick="openDelete(\'' + (u.plate_number || '') + '\')">&#128465; Remove</button>' +
+                '</div></td>' +
+                '</tr>';
+        }).join('');
+    }
+
+    function filterUsers() {
+        var search = document.getElementById('searchInput').value.trim().toLowerCase();
+        var status = document.getElementById('statusFilter').value;
+        var filtered = allUsers.filter(function(u) {
+            if (status === 'parked' && !u.currently_parked) return false;
+            if (status === 'exited' && u.currently_parked) return false;
+            if (search) {
+                var s = (u.driver_email || '') + (u.plate_number || '') + (u.driver_phone || '');
+                if (s.toLowerCase().indexOf(search) === -1) return false;
+            }
+            return true;
+        });
+        renderUsers(filtered);
+    }
+
+    function openMsg(email, plate) {
+        document.getElementById('modalToEmail').value = email;
+        document.getElementById('modalToPlate').value = plate;
+        document.getElementById('modalSubject').value = '';
+        document.getElementById('modalBody').value = '';
+        document.getElementById('msgModal').classList.add('show');
+    }
+
+    async function sendMsg() {
+        var email = document.getElementById('modalToEmail').value;
+        var plate = document.getElementById('modalToPlate').value;
+        var subject = document.getElementById('modalSubject').value.trim();
+        var message = document.getElementById('modalBody').value.trim();
+        if (!subject || !message) { showAlert('alertError', 'Subject and message are required'); return; }
+        var btn = document.getElementById('sendMsgBtn');
+        btn.disabled = true; btn.textContent = 'Sending...';
+        try {
+            var resp = await fetch('/v1/admin/message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: email, plate: plate, subject: subject, message: message })
+            });
+            var data = await resp.json();
+            if (!resp.ok) {
+                showAlert('alertError', data.detail || 'Failed to send');
+            } else {
+                showAlert('alertSuccess', '&#9989; Message sent to ' + email);
+                closeModal('msgModal');
+            }
+        } catch(err) {
+            showAlert('alertError', 'Network error: ' + err.message);
+        }
+        btn.disabled = false; btn.textContent = '&#128233; Send Email';
+    }
+
+    function openDelete(plate) {
+        if (!plate) return;
+        pendingDeletePlate = plate;
+        document.getElementById('deletePlateName').textContent = plate;
+        document.getElementById('deleteModal').classList.add('show');
+    }
+
+    async function confirmDelete() {
+        if (!pendingDeletePlate) return;
+        var btn = document.getElementById('confirmDeleteBtn');
+        btn.disabled = true; btn.textContent = 'Deleting...';
+        try {
+            var resp = await fetch('/v1/admin/users/' + encodeURIComponent(pendingDeletePlate), { method: 'DELETE' });
+            var data = await resp.json();
+            if (!resp.ok) {
+                showAlert('alertError', data.detail || 'Delete failed');
+            } else {
+                showAlert('alertSuccess', '&#9989; Records for ' + pendingDeletePlate + ' removed');
+                closeModal('deleteModal');
+                loadUsers();
+            }
+        } catch(err) {
+            showAlert('alertError', 'Network error: ' + err.message);
+        }
+        btn.disabled = false; btn.textContent = 'Delete Records';
+        pendingDeletePlate = '';
+    }
+
+    function closeModal(id) {
+        document.getElementById(id).classList.remove('show');
+    }
+
+    function exportCSV() {
+        if (!allUsers.length) { showAlert('alertError', 'No data to export'); return; }
+        var headers = ['Email', 'Plate', 'Phone', 'Total Visits', 'Total Spent (KES)', 'Last Visit', 'Status'];
+        var rows = allUsers.map(function(u) {
+            return [
+                u.driver_email || '',
+                u.plate_number || '',
+                u.driver_phone || '',
+                u.total_visits || 0,
+                (u.total_spent || 0).toFixed(2),
+                u.last_visit || '',
+                u.currently_parked ? 'Parked' : 'Exited'
+            ].map(function(v) { return '"' + String(v).replace(/"/g, '""') + '"'; }).join(',');
+        });
+        var csv = [headers.join(',')].concat(rows).join('\n');
+        var blob = new Blob([csv], { type: 'text/csv' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'wellparks_users_' + new Date().toISOString().slice(0, 10) + '.csv';
+        a.click();
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeModal('msgModal');
+            closeModal('deleteModal');
+        }
+    });
+
+    checkAuth();
+    loadUsers();
+    </script>
+</body>
+</html>

@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WellParks - Admin Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .admin-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .tab-bar {
+            display: flex;
+            gap: 0;
+            border-bottom: 2px solid var(--border);
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+        .tab-btn {
+            background: none;
+            border: none;
+            padding: 12px 20px;
+            color: var(--text-dim);
+            font-size: .9rem;
+            font-weight: 600;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: all .2s;
+            font-family: var(--font);
+        }
+        .tab-btn.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+        .tab-btn:hover { color: var(--text); }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+        .broadcast-textarea {
+            width: 100%;
+            min-height: 120px;
+            padding: 12px 16px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-size: 1rem;
+            font-family: var(--font);
+            resize: vertical;
+            transition: border-color .2s;
+        }
+        .broadcast-textarea:focus { outline: none; border-color: var(--accent); }
+        .recipient-select {
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-size: 1rem;
+            font-family: var(--font);
+            margin-bottom: 16px;
+        }
+        .notif-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            padding: 14px 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .notif-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            flex-shrink: 0;
+        }
+        .notif-icon.entry { background: rgba(59,130,246,.15); color: var(--info); }
+        .notif-icon.receipt { background: rgba(132,204,22,.15); color: var(--accent); }
+        .notif-icon.broadcast { background: rgba(245,158,11,.15); color: var(--warning); }
+        .notif-icon.admin_message { background: rgba(168,85,247,.15); color: #a855f7; }
+        .notif-body { flex: 1; min-width: 0; }
+        .notif-subject { font-weight: 600; font-size: .9rem; margin-bottom: 2px; }
+        .notif-meta { font-size: .78rem; color: var(--text-dim); }
+        .char-count { font-size: .78rem; color: var(--text-dim); text-align: right; margin-top: 4px; }
+        .stat-trend {
+            font-size: .75rem;
+            color: var(--accent);
+            margin-top: 4px;
+        }
+        .logout-btn {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text-dim);
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: .85rem;
+            font-family: var(--font);
+            transition: all .2s;
+        }
+        .logout-btn:hover { border-color: var(--danger); color: var(--danger); }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <div class="logo"><span>Well</span>Parks</div>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/entry">Entry</a>
+            <a href="/exit">Exit</a>
+            <a href="/admin" class="active">Dashboard</a>
+            <a href="/users">Users</a>
+            <a href="/map">Parking Map</a>
+        </nav>
+    </div>
+    <div class="container">
+        <div class="admin-header">
+            <div>
+                <h1 class="page-title" style="margin-bottom:0;">Admin Dashboard</h1>
+                <p class="page-subtitle" style="margin-bottom:0;">Real-time parking facility overview</p>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;">
+                <span id="adminEmailBadge" style="font-size:.85rem;color:var(--text-dim);"></span>
+                <button class="logout-btn" onclick="doLogout()">&#128274; Logout</button>
+            </div>
+        </div>
+
+        <div id="alertSuccess" class="alert alert-success" style="margin-top:16px;"></div>
+        <div id="alertError" class="alert alert-error" style="margin-top:16px;"></div>
+
+        <div class="stats-grid" style="margin-top:24px;">
+            <div class="stat-card occupied">
+                <div class="stat-value" id="statOccupied">--</div>
+                <div class="stat-label">Occupied Spaces</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statAvailable">--</div>
+                <div class="stat-label">Available Spaces</div>
+            </div>
+            <div class="stat-card revenue">
+                <div class="stat-value" id="statRevenue">--</div>
+                <div class="stat-label">Revenue Today (KES)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statExits">--</div>
+                <div class="stat-label">Exits Today</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statUsers" style="color:var(--info)">--</div>
+                <div class="stat-label">Unique Drivers</div>
+            </div>
+            <div class="stat-card revenue">
+                <div class="stat-value" id="statTotalRevenue">--</div>
+                <div class="stat-label">Total Revenue (KES)</div>
+            </div>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchTab('tabTransactions', this)">&#128203; Transactions</button>
+            <button class="tab-btn" onclick="switchTab('tabBroadcast', this)">&#128226; Broadcast Message</button>
+            <button class="tab-btn" onclick="switchTab('tabNotifications', this)">&#128276; Notification Log</button>
+        </div>
+
+        <!-- Tab: Transactions -->
+        <div id="tabTransactions" class="tab-panel active">
+            <div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
+                    <div class="card-title" style="margin-bottom:0;">Recent Transactions</div>
+                    <button class="btn btn-secondary" style="padding:8px 16px;font-size:.85rem" onclick="loadAdminDashboard()">&#8635; Refresh</button>
+                </div>
+                <div style="overflow-x:auto">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Plate</th>
+                                <th>Space</th>
+                                <th>Entry</th>
+                                <th>Exit</th>
+                                <th>Duration</th>
+                                <th>Amount</th>
+                                <th>Ref</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="exitsTable">
+                            <tr><td colspan="8" style="text-align:center;color:var(--text-dim)">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Broadcast -->
+        <div id="tabBroadcast" class="tab-panel">
+            <div class="two-col">
+                <div class="card">
+                    <div class="card-title">&#128233; Send Broadcast Message</div>
+                    <div class="form-group">
+                        <label>Recipients</label>
+                        <select class="recipient-select" id="broadcastRecipient">
+                            <option value="all">All registered drivers (with completed exits)</option>
+                            <option value="parked">Currently parked drivers only</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Subject</label>
+                        <input type="text" id="broadcastSubject" placeholder="e.g. Parking Notice - WellParks" maxlength="100">
+                    </div>
+                    <div class="form-group">
+                        <label>Message</label>
+                        <textarea class="broadcast-textarea" id="broadcastMessage" maxlength="2000" placeholder="Write your message to drivers here..." oninput="updateCharCount()"></textarea>
+                        <div class="char-count"><span id="charCount">0</span> / 2000</div>
+                    </div>
+                    <button class="btn btn-primary btn-block" id="broadcastBtn" onclick="sendBroadcast()">&#128226; Send Broadcast</button>
+                </div>
+                <div class="card">
+                    <div class="card-title">&#128221; Custom Message to Driver</div>
+                    <div class="form-group">
+                        <label>Driver Email</label>
+                        <input type="email" id="msgEmail" placeholder="driver@email.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Plate Number (for reference)</label>
+                        <input type="text" id="msgPlate" placeholder="e.g. KAA 123A">
+                    </div>
+                    <div class="form-group">
+                        <label>Subject</label>
+                        <input type="text" id="msgSubject" placeholder="Message subject">
+                    </div>
+                    <div class="form-group">
+                        <label>Message</label>
+                        <textarea class="broadcast-textarea" id="msgBody" placeholder="Write your message here..." maxlength="2000"></textarea>
+                    </div>
+                    <button class="btn btn-primary btn-block" id="msgBtn" onclick="sendCustomMessage()">&#128233; Send Message</button>
+                </div>
+            </div>
+            <div class="card" style="margin-top:0;">
+                <div class="card-title">&#128200; Past Broadcasts</div>
+                <div style="overflow-x:auto">
+                    <table>
+                        <thead>
+                            <tr><th>Subject</th><th>Message</th><th>Recipients</th><th>Sent At</th></tr>
+                        </thead>
+                        <tbody id="broadcastTable">
+                            <tr><td colspan="4" style="text-align:center;color:var(--text-dim)">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Notifications -->
+        <div id="tabNotifications" class="tab-panel">
+            <div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
+                    <div class="card-title" style="margin-bottom:0;">&#128276; Notification History</div>
+                    <button class="btn btn-secondary" style="padding:8px 16px;font-size:.85rem" onclick="loadNotifications()">&#8635; Refresh</button>
+                </div>
+                <div id="notifList"><div style="text-align:center;color:var(--text-dim);padding:20px;">Loading...</div></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    var currentTab = 'tabTransactions';
+
+    function showAlert(id, msg) {
+        var el = document.getElementById(id);
+        el.textContent = msg;
+        el.classList.add('show');
+        setTimeout(function() { el.classList.remove('show'); }, 7000);
+    }
+
+    function switchTab(tabId, btn) {
+        document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+        document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+        document.getElementById(tabId).classList.add('active');
+        btn.classList.add('active');
+        currentTab = tabId;
+        if (tabId === 'tabBroadcast') loadBroadcasts();
+        if (tabId === 'tabNotifications') loadNotifications();
+    }
+
+    function formatDate(iso) {
+        if (!iso) return '--';
+        return new Date(iso).toLocaleString('en-KE', { dateStyle: 'short', timeStyle: 'short' });
+    }
+
+    function formatDuration(m) {
+        if (!m) return '--';
+        var h = Math.floor(m / 60);
+        var mm = Math.round(m % 60);
+        return h > 0 ? h + 'h ' + mm + 'm' : mm + 'm';
+    }
+
+    async function checkAuth() {
+        try {
+            var resp = await fetch('/v1/auth/me');
+            if (!resp.ok) { window.location.href = '/login'; return; }
+            var data = await resp.json();
+            document.getElementById('adminEmailBadge').textContent = data.email;
+        } catch(e) { window.location.href = '/login'; }
+    }
+
+    async function doLogout() {
+        await fetch('/v1/auth/logout', { method: 'POST' });
+        window.location.href = '/login';
+    }
+
+    async function loadAdminDashboard() {
+        try {
+            var resp = await fetch('/v1/admin/stats');
+            if (resp.status === 401) { window.location.href = '/login'; return; }
+            var stats = await resp.json();
+            document.getElementById('statOccupied').textContent = stats.occupied;
+            document.getElementById('statAvailable').textContent = stats.available;
+            document.getElementById('statRevenue').textContent = (stats.revenue_today || 0).toLocaleString();
+            document.getElementById('statExits').textContent = stats.exits_today;
+            document.getElementById('statUsers').textContent = stats.total_users || '--';
+            document.getElementById('statTotalRevenue').textContent = (stats.total_revenue || 0).toLocaleString();
+        } catch(e) {}
+
+        try {
+            var resp2 = await fetch('/v1/admin/recent-exits');
+            var exits = await resp2.json();
+            var tbody = document.getElementById('exitsTable');
+            if (!exits.length) {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-dim)">No transactions yet</td></tr>';
+                return;
+            }
+            tbody.innerHTML = exits.map(function(ex) {
+                return '<tr>' +
+                    '<td><strong>' + ex.plate_number + '</strong></td>' +
+                    '<td>#' + ex.space_number + '</td>' +
+                    '<td>' + formatDate(ex.entry_time) + '</td>' +
+                    '<td>' + formatDate(ex.exit_time) + '</td>' +
+                    '<td>' + formatDuration(ex.duration_minutes) + '</td>' +
+                    '<td style="color:var(--accent)">KES ' + (ex.amount || 0).toLocaleString() + '</td>' +
+                    '<td><code style="font-size:.8rem">' + (ex.transaction_ref || '--') + '</code></td>' +
+                    '<td><span class="badge badge-success">Paid</span></td>' +
+                    '</tr>';
+            }).join('');
+        } catch(e) {}
+    }
+
+    function updateCharCount() {
+        var len = document.getElementById('broadcastMessage').value.length;
+        document.getElementById('charCount').textContent = len;
+    }
+
+    async function sendBroadcast() {
+        var subject = document.getElementById('broadcastSubject').value.trim();
+        var message = document.getElementById('broadcastMessage').value.trim();
+        var recipient = document.getElementById('broadcastRecipient').value;
+        if (!subject || !message) { showAlert('alertError', 'Please fill in subject and message'); return; }
+        var btn = document.getElementById('broadcastBtn');
+        btn.disabled = true; btn.textContent = 'Sending...';
+        try {
+            var resp = await fetch('/v1/admin/broadcast', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ subject: subject, message: message, recipient: recipient })
+            });
+            var data = await resp.json();
+            if (!resp.ok) {
+                showAlert('alertError', data.detail || 'Failed to send');
+            } else {
+                showAlert('alertSuccess', '&#9989; Broadcast sent to ' + data.sent_to + ' driver(s)');
+                document.getElementById('broadcastMessage').value = '';
+                document.getElementById('broadcastSubject').value = '';
+                document.getElementById('charCount').textContent = '0';
+                loadBroadcasts();
+            }
+        } catch(err) {
+            showAlert('alertError', 'Network error: ' + err.message);
+        }
+        btn.disabled = false; btn.textContent = '&#128226; Send Broadcast';
+    }
+
+    async function sendCustomMessage() {
+        var email = document.getElementById('msgEmail').value.trim();
+        var plate = document.getElementById('msgPlate').value.trim();
+        var subject = document.getElementById('msgSubject').value.trim();
+        var message = document.getElementById('msgBody').value.trim();
+        if (!email || !subject || !message) { showAlert('alertError', 'Email, subject and message are required'); return; }
+        var btn = document.getElementById('msgBtn');
+        btn.disabled = true; btn.textContent = 'Sending...';
+        try {
+            var resp = await fetch('/v1/admin/message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: email, plate: plate, subject: subject, message: message })
+            });
+            var data = await resp.json();
+            if (!resp.ok) {
+                showAlert('alertError', data.detail || 'Failed to send');
+            } else {
+                showAlert('alertSuccess', '&#9989; Message sent to ' + email);
+                document.getElementById('msgEmail').value = '';
+                document.getElementById('msgPlate').value = '';
+                document.getElementById('msgSubject').value = '';
+                document.getElementById('msgBody').value = '';
+            }
+        } catch(err) {
+            showAlert('alertError', 'Network error: ' + err.message);
+        }
+        btn.disabled = false; btn.textContent = '&#128233; Send Message';
+    }
+
+    async function loadBroadcasts() {
+        try {
+            var resp = await fetch('/v1/admin/broadcasts');
+            var rows = await resp.json();
+            var tbody = document.getElementById('broadcastTable');
+            if (!rows.length) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-dim)">No broadcasts yet</td></tr>';
+                return;
+            }
+            tbody.innerHTML = rows.map(function(r) {
+                return '<tr>' +
+                    '<td><strong>' + r.subject + '</strong></td>' +
+                    '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim)">' + r.message + '</td>' +
+                    '<td><span class="badge badge-info">' + r.recipient_count + ' drivers</span></td>' +
+                    '<td>' + formatDate(r.sent_at) + '</td>' +
+                    '</tr>';
+            }).join('');
+        } catch(e) {}
+    }
+
+    var notifIcons = { ENTRY: '&#128663;', RECEIPT: '&#9989;', BROADCAST: '&#128226;', ADMIN_MESSAGE: '&#128233;', SYSTEM: '&#128276;' };
+    var notifClasses = { ENTRY: 'entry', RECEIPT: 'receipt', BROADCAST: 'broadcast', ADMIN_MESSAGE: 'admin_message', SYSTEM: 'entry' };
+
+    async function loadNotifications() {
+        try {
+            var resp = await fetch('/v1/admin/notifications');
+            var notifs = await resp.json();
+            var el = document.getElementById('notifList');
+            if (!notifs.length) {
+                el.innerHTML = '<p style="text-align:center;color:var(--text-dim);padding:20px;">No notifications yet.</p>';
+                return;
+            }
+            el.innerHTML = notifs.map(function(n) {
+                var icon = notifIcons[n.type] || '&#128276;';
+                var cls = notifClasses[n.type] || 'entry';
+                return '<div class="notif-row">' +
+                    '<div class="notif-icon ' + cls + '">' + icon + '</div>' +
+                    '<div class="notif-body">' +
+                    '<div class="notif-subject">' + (n.subject || '--') + '</div>' +
+                    '<div class="notif-meta">To: ' + (n.recipient_email || '--') +
+                    (n.recipient_plate ? ' &nbsp;|&nbsp; Plate: <strong>' + n.recipient_plate + '</strong>' : '') +
+                    ' &nbsp;|&nbsp; ' + formatDate(n.sent_at) +
+                    ' &nbsp;|&nbsp; <span class="badge badge-' + (n.type === 'RECEIPT' ? 'success' : 'info') + '">' + (n.type || 'SYSTEM') + '</span></div>' +
+                    (n.message ? '<div style="font-size:.82rem;color:var(--text-dim);margin-top:4px;">' + n.message.slice(0, 120) + (n.message.length > 120 ? '...' : '') + '</div>' : '') +
+                    '</div></div>';
+            }).join('');
+        } catch(e) {
+            document.getElementById('notifList').innerHTML = '<p style="color:var(--danger);text-align:center;">Failed to load notifications</p>';
+        }
+    }
+
+    checkAuth();
+    loadAdminDashboard();
+    setInterval(loadAdminDashboard, 5000);
+    </script>
+</body>
+</html>

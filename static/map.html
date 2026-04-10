@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WellParks - Parking Map</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="navbar">
+        <div class="logo"><span>Well</span>Parks</div>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/entry">Entry</a>
+            <a href="/exit">Exit</a>
+            <a href="/admin">Dashboard</a>
+            <a href="/users">Users</a>
+            <a href="/map" class="active">Parking Map</a>
+        </nav>
+    </div>
+    <div class="container">
+        <h1 class="page-title">Parking Map</h1>
+        <p class="page-subtitle">500-space facility overview. Click any space for details.</p>
+
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+                <div class="legend">
+                    <div class="legend-item">
+                        <div class="legend-color available-color"></div>
+                        <span>Available</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color occupied-color"></div>
+                        <span>Occupied</span>
+                    </div>
+                </div>
+                <div class="map-filter">
+                    <select id="mapFilter" onchange="filterMap()">
+                        <option value="all">All Spaces</option>
+                        <option value="available">Available Only</option>
+                        <option value="occupied">Occupied Only</option>
+                    </select>
+                    <input type="text" class="search-input" id="mapSearch" placeholder="Search plate..." oninput="filterMap()">
+                </div>
+            </div>
+            <div id="occupancySummary" style="margin-bottom:12px;font-size:.9rem;color:var(--text-dim)">Loading...</div>
+            <div class="parking-map-grid" id="parkingGrid"></div>
+        </div>
+    </div>
+
+    <div class="space-modal-overlay" id="spaceModal">
+        <div class="space-modal">
+            <button class="close-btn" onclick="closeModal()">&times;</button>
+            <h3 id="modalTitle">Space #--</h3>
+            <div id="modalContent"></div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script>loadParkingMap();</script>
+</body>
+</html>

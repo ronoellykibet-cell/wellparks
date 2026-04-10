@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WellParks - Admin Login</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .login-wrap {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg);
+        }
+        .login-box {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 48px 40px;
+            width: 100%;
+            max-width: 440px;
+        }
+        .login-logo {
+            font-size: 1.8rem;
+            font-weight: 800;
+            text-align: center;
+            margin-bottom: 8px;
+            letter-spacing: 1px;
+        }
+        .login-logo span { color: var(--accent); }
+        .login-sub {
+            text-align: center;
+            color: var(--text-dim);
+            font-size: .9rem;
+            margin-bottom: 36px;
+        }
+        .password-wrap {
+            position: relative;
+        }
+        .password-wrap input {
+            padding-right: 48px;
+        }
+        .toggle-pw {
+            position: absolute;
+            right: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            font-size: 1.1rem;
+            padding: 0;
+        }
+        .strength-bar {
+            height: 4px;
+            border-radius: 2px;
+            background: var(--border);
+            margin-top: 8px;
+            overflow: hidden;
+        }
+        .strength-fill {
+            height: 100%;
+            border-radius: 2px;
+            width: 0;
+            transition: width .3s, background .3s;
+        }
+        .strength-label {
+            font-size: .75rem;
+            color: var(--text-dim);
+            margin-top: 4px;
+        }
+        .otp-inputs {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin: 24px 0;
+        }
+        .otp-inputs input {
+            width: 52px;
+            height: 60px;
+            text-align: center;
+            font-size: 1.6rem;
+            font-weight: 700;
+            background: var(--bg);
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            color: var(--text);
+            font-family: monospace;
+            transition: border-color .2s;
+        }
+        .otp-inputs input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        .otp-info {
+            text-align: center;
+            color: var(--text-dim);
+            font-size: .9rem;
+            margin-bottom: 8px;
+        }
+        .otp-email-badge {
+            display: inline-block;
+            background: rgba(132,204,22,.12);
+            color: var(--accent);
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: .85rem;
+            font-weight: 600;
+            margin: 8px auto 20px;
+        }
+        .step { display: none; }
+        .step.active { display: block; }
+        .divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 20px 0;
+            color: var(--text-dim);
+            font-size: .8rem;
+        }
+        .divider::before, .divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+        .resend-link {
+            text-align: center;
+            font-size: .85rem;
+            margin-top: 16px;
+            color: var(--text-dim);
+        }
+        .resend-link button {
+            background: none;
+            border: none;
+            color: var(--accent);
+            cursor: pointer;
+            font-size: .85rem;
+            text-decoration: underline;
+        }
+        .otp-timer {
+            font-weight: 600;
+            color: var(--warning);
+        }
+    </style>
+</head>
+<body>
+<div class="login-wrap">
+    <div class="login-box">
+        <div class="login-logo"><span>Well</span>Parks</div>
+        <div class="login-sub">Parking Management System — Admin Portal</div>
+
+        <div id="alertError" class="alert alert-error"></div>
+        <div id="alertSuccess" class="alert alert-success"></div>
+
+        <!-- Step 1: Credentials -->
+        <div id="stepLogin" class="step active">
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Admin Email</label>
+                    <input type="email" id="loginEmail" placeholder="admin@wellparks.com" required autocomplete="email">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <div class="password-wrap">
+                        <input type="password" id="loginPassword" placeholder="Enter your password" required autocomplete="current-password" oninput="checkStrength(this.value)">
+                        <button type="button" class="toggle-pw" onclick="togglePw()">&#128065;</button>
+                    </div>
+                    <div class="strength-bar"><div class="strength-fill" id="strengthFill"></div></div>
+                    <div class="strength-label" id="strengthLabel"></div>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block" id="loginBtn" style="margin-top:8px">
+                    Send OTP to Email
+                </button>
+            </form>
+            <div class="divider">secure access</div>
+            <p style="text-align:center;font-size:.8rem;color:var(--text-dim);">
+                &#128274; Protected by two-factor authentication.<br>An OTP will be sent to your registered email.
+            </p>
+        </div>
+
+        <!-- Step 2: OTP -->
+        <div id="stepOTP" class="step">
+            <p class="otp-info">Enter the 6-digit code sent to</p>
+            <div style="text-align:center">
+                <span class="otp-email-badge" id="otpEmailBadge"></span>
+            </div>
+            <div class="otp-inputs">
+                <input type="text" maxlength="1" class="otp-digit" id="d0" oninput="otpInput(this,0)" onkeydown="otpKey(event,0)">
+                <input type="text" maxlength="1" class="otp-digit" id="d1" oninput="otpInput(this,1)" onkeydown="otpKey(event,1)">
+                <input type="text" maxlength="1" class="otp-digit" id="d2" oninput="otpInput(this,2)" onkeydown="otpKey(event,2)">
+                <input type="text" maxlength="1" class="otp-digit" id="d3" oninput="otpInput(this,3)" onkeydown="otpKey(event,3)">
+                <input type="text" maxlength="1" class="otp-digit" id="d4" oninput="otpInput(this,4)" onkeydown="otpKey(event,4)">
+                <input type="text" maxlength="1" class="otp-digit" id="d5" oninput="otpInput(this,5)" onkeydown="otpKey(event,5)">
+            </div>
+            <button class="btn btn-primary btn-block" id="verifyBtn" onclick="verifyOTP()">Verify & Login</button>
+            <div class="resend-link">
+                <span>Code expires in <span class="otp-timer" id="otpTimer">10:00</span></span>
+                &nbsp;|&nbsp;
+                <button onclick="resendOTP()">Resend Code</button>
+            </div>
+            <div style="margin-top:16px;text-align:center">
+                <button onclick="backToLogin()" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:.85rem;">
+                    &#8592; Back to Login
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+var loginEmail = '';
+var otpTimerInterval = null;
+
+function showAlert(id, msg) {
+    var el = document.getElementById(id);
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(function() { el.classList.remove('show'); }, 7000);
+}
+
+function togglePw() {
+    var inp = document.getElementById('loginPassword');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+function checkStrength(pw) {
+    var fill = document.getElementById('strengthFill');
+    var label = document.getElementById('strengthLabel');
+    if (!pw) { fill.style.width = '0'; label.textContent = ''; return; }
+    var score = 0;
+    if (pw.length >= 8) score++;
+    if (/[A-Z]/.test(pw)) score++;
+    if (/[a-z]/.test(pw)) score++;
+    if (/[0-9]/.test(pw)) score++;
+    if (/[^A-Za-z0-9]/.test(pw)) score++;
+    var colors = ['#ef4444', '#f59e0b', '#f59e0b', '#84cc16', '#84cc16'];
+    var labels = ['Very Weak', 'Weak', 'Fair', 'Strong', 'Very Strong'];
+    fill.style.width = (score * 20) + '%';
+    fill.style.background = colors[score - 1] || '#ef4444';
+    label.textContent = labels[score - 1] || '';
+    label.style.color = colors[score - 1] || '#ef4444';
+}
+
+document.getElementById('loginForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    var pw = document.getElementById('loginPassword').value;
+    if (pw.length < 8) {
+        showAlert('alertError', 'Password must be at least 8 characters');
+        return;
+    }
+    var btn = document.getElementById('loginBtn');
+    btn.disabled = true;
+    btn.textContent = 'Sending OTP...';
+    loginEmail = document.getElementById('loginEmail').value.trim();
+    try {
+        var resp = await fetch('/v1/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: loginEmail, password: pw })
+        });
+        var data = await resp.json();
+        if (!resp.ok) {
+            showAlert('alertError', data.detail || 'Invalid credentials');
+        } else {
+            document.getElementById('otpEmailBadge').textContent = loginEmail;
+            document.getElementById('stepLogin').classList.remove('active');
+            document.getElementById('stepOTP').classList.add('active');
+            document.getElementById('d0').focus();
+            startOTPTimer(600);
+        }
+    } catch (err) {
+        showAlert('alertError', 'Network error: ' + err.message);
+    }
+    btn.disabled = false;
+    btn.textContent = 'Send OTP to Email';
+});
+
+function otpInput(el, idx) {
+    el.value = el.value.replace(/[^0-9]/g, '');
+    if (el.value && idx < 5) {
+        document.getElementById('d' + (idx + 1)).focus();
+    }
+    if (getOTPCode().length === 6) verifyOTP();
+}
+
+function otpKey(e, idx) {
+    if (e.key === 'Backspace' && !document.getElementById('d' + idx).value && idx > 0) {
+        document.getElementById('d' + (idx - 1)).focus();
+    }
+}
+
+function getOTPCode() {
+    return [0,1,2,3,4,5].map(function(i) { return document.getElementById('d' + i).value; }).join('');
+}
+
+async function verifyOTP() {
+    var code = getOTPCode();
+    if (code.length !== 6) { showAlert('alertError', 'Please enter all 6 digits'); return; }
+    var btn = document.getElementById('verifyBtn');
+    btn.disabled = true;
+    btn.textContent = 'Verifying...';
+    try {
+        var resp = await fetch('/v1/auth/verify-otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: loginEmail, code: code })
+        });
+        var data = await resp.json();
+        if (!resp.ok) {
+            showAlert('alertError', data.detail || 'Invalid OTP code');
+            [0,1,2,3,4,5].forEach(function(i) { document.getElementById('d' + i).value = ''; });
+            document.getElementById('d0').focus();
+        } else {
+            if (otpTimerInterval) clearInterval(otpTimerInterval);
+            showAlert('alertSuccess', 'Login successful! Redirecting...');
+            setTimeout(function() { window.location.href = '/admin'; }, 1000);
+        }
+    } catch (err) {
+        showAlert('alertError', 'Network error: ' + err.message);
+    }
+    btn.disabled = false;
+    btn.textContent = 'Verify & Login';
+}
+
+function startOTPTimer(seconds) {
+    if (otpTimerInterval) clearInterval(otpTimerInterval);
+    var remaining = seconds;
+    function update() {
+        var m = Math.floor(remaining / 60);
+        var s = remaining % 60;
+        document.getElementById('otpTimer').textContent = m + ':' + (s < 10 ? '0' : '') + s;
+        if (remaining <= 0) {
+            clearInterval(otpTimerInterval);
+            document.getElementById('otpTimer').textContent = 'Expired';
+        }
+        remaining--;
+    }
+    update();
+    otpTimerInterval = setInterval(update, 1000);
+}
+
+async function resendOTP() {
+    var pw = document.getElementById('loginPassword').value;
+    try {
+        var resp = await fetch('/v1/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: loginEmail, password: pw })
+        });
+        if (resp.ok) {
+            showAlert('alertSuccess', 'New OTP sent to ' + loginEmail);
+            [0,1,2,3,4,5].forEach(function(i) { document.getElementById('d' + i).value = ''; });
+            document.getElementById('d0').focus();
+            startOTPTimer(600);
+        }
+    } catch (e) {}
+}
+
+function backToLogin() {
+    if (otpTimerInterval) clearInterval(otpTimerInterval);
+    [0,1,2,3,4,5].forEach(function(i) { document.getElementById('d' + i).value = ''; });
+    document.getElementById('stepOTP').classList.remove('active');
+    document.getElementById('stepLogin').classList.add('active');
+}
+</script>
+</body>
+</html>
